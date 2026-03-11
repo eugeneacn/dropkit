@@ -1,0 +1,25 @@
+{
+  "id": "markdown-to-html",
+  "name": "Markdown to HTML",
+  "version": "1.0.0",
+  "description": "Convert Markdown files to styled, self-contained HTML documents with syntax highlighting, table of contents generation, responsive layout, and custom theme support.",
+  "category": "converters",
+  "tags": ["markdown", "html", "conversion", "document", "styling", "toc"],
+  "author": "dropkit",
+  "license": "MIT",
+  "deps": {
+    "npm": ["marked", "highlight.js"]
+  },
+  "input": {
+    "arguments": "file path or glob pattern (e.g., docs/*.md)",
+    "fileTypes": [".md", ".markdown"]
+  },
+  "output": {
+    "fileTypes": [".html"]
+  },
+  "targets": {
+    "claude-code": { "file": "overrides/claude-code.md" },
+    "kiro": { "file": "overrides/kiro.md" },
+    "default": { "file": "skill.md" }
+  }
+}
