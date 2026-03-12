@@ -1,0 +1,256 @@
+# ─── Build & Publish Registry ────────────────────────────────────
+#
+# Triggers:
+#   - On push to main: validates, builds registry.json, commits it
+#   - On PR: validates only (no commit), posts summary as PR comment
+#
+# The registry.json is committed to the repo so it can be served
+# directly from GitHub raw URLs without a build step on the consumer side.
+
+name: Build Registry
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "skills/**"
+      - "agents/**"
+      - "collections/**"
+      - "schemas/**"
+      - "targets/**"
+      - "scripts/build-registry.js"
+  pull_request:
+    branches: [main]
+    paths:
+      - "skills/**"
+      - "agents/**"
+      - "collections/**"
+      - "schemas/**"
+      - "targets/**"
+      - "scripts/build-registry.js"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # ── Validate on every PR ──────────────────────────────────────
+
+  validate:
+    name: Validate Manifests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate manifests
+        id: validate
+        run: |
+          set -o pipefail
+          node scripts/build-registry.js --validate-only --verbose 2>&1 | tee validation-output.txt
+        continue-on-error: true
+
+      - name: Dry-run build
+        id: dry-run
+        if: steps.validate.outcome == 'success'
+        run: |
+          mkdir -p tmp
+          node scripts/build-registry.js --out tmp --verbose 2>&1 | tee build-output.txt
+
+          # Extract stats for the PR comment
+          SKILLS=$(jq '.stats.skills' tmp/registry.json)
+          AGENTS=$(jq '.stats.agents' tmp/registry.json)
+          COLLECTIONS=$(jq '.stats.collections' tmp/registry.json)
+          CATEGORIES=$(jq '.stats.categories' tmp/registry.json)
+
+          echo "skills=$SKILLS" >> "$GITHUB_OUTPUT"
+          echo "agents=$AGENTS" >> "$GITHUB_OUTPUT"
+          echo "collections=$COLLECTIONS" >> "$GITHUB_OUTPUT"
+          echo "categories=$CATEGORIES" >> "$GITHUB_OUTPUT"
+
+      - name: Diff against current registry
+        id: diff
+        if: steps.dry-run.outcome == 'success'
+        run: |
+          if [ -f registry.json ]; then
+            # Extract IDs safely — jq won't error on empty arrays
+            jq -r '(.skills // [])[].id, (.agents // [])[].id' registry.json | sort > /tmp/old-ids.txt
+            jq -r '(.skills // [])[].id, (.agents // [])[].id' tmp/registry.json | sort > /tmp/new-ids.txt
+
+            ADDED=$(comm -13 /tmp/old-ids.txt /tmp/new-ids.txt || true)
+            REMOVED=$(comm -23 /tmp/old-ids.txt /tmp/new-ids.txt || true)
+
+            # Detect version changes
+            jq -r '(.skills // [])[].id as $id | (.skills // [])[] | select(.id == $id) | "\(.id)@\(.version)"' registry.json 2>/dev/null | sort > /tmp/old-versions.txt || true
+            jq -r '(.skills // [])[].id as $id | (.skills // [])[] | select(.id == $id) | "\(.id)@\(.version)"' tmp/registry.json 2>/dev/null | sort > /tmp/new-versions.txt || true
+            UPDATED=$(comm -13 /tmp/old-versions.txt /tmp/new-versions.txt || true)
+
+            echo "added<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$ADDED" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+
+            echo "removed<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$REMOVED" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+
+            echo "updated<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$UPDATED" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          else
+            # First build — everything is new
+            ALL=$(jq -r '(.skills // [])[].id, (.agents // [])[].id' tmp/registry.json || true)
+            echo "added<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$ALL" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+            echo "removed=" >> "$GITHUB_OUTPUT"
+            echo "updated=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post PR comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const validate = '${{ steps.validate.outcome }}';
+            const dryRun = '${{ steps.dry-run.outcome }}';
+            const skills = '${{ steps.dry-run.outputs.skills }}' || '?';
+            const agents = '${{ steps.dry-run.outputs.agents }}' || '?';
+            const collections = '${{ steps.dry-run.outputs.collections }}' || '?';
+            const categories = '${{ steps.dry-run.outputs.categories }}' || '?';
+            const added = `${{ steps.diff.outputs.added }}`.trim();
+            const removed = `${{ steps.diff.outputs.removed }}`.trim();
+            const updated = `${{ steps.diff.outputs.updated }}`.trim();
+
+            let body = '## 📦 dropkit Registry Build\n\n';
+
+            if (validate === 'failure') {
+              const fs = require('fs');
+              const output = fs.readFileSync('validation-output.txt', 'utf-8');
+              body += '### ❌ Validation Failed\n\n';
+              body += '```\n' + output.slice(-2000) + '\n```\n';
+            } else {
+              body += '### ✔ Validation Passed\n\n';
+              body += `| Metric | Count |\n| --- | --- |\n`;
+              body += `| Skills | ${skills} |\n`;
+              body += `| Agents | ${agents} |\n`;
+              body += `| Collections | ${collections} |\n`;
+              body += `| Categories | ${categories} |\n\n`;
+
+              if (added) {
+                body += '**Added:**\n' + added.split('\n').map(s => `- \`${s}\``).join('\n') + '\n\n';
+              }
+              if (removed) {
+                body += '**Removed:**\n' + removed.split('\n').map(s => `- \`${s}\``).join('\n') + '\n\n';
+              }
+              if (updated) {
+                body += '**Updated:**\n' + updated.split('\n').map(s => `- \`${s}\``).join('\n') + '\n\n';
+              }
+
+              if (!added && !removed && !updated) {
+                body += '_No changes to registry entries._\n\n';
+              }
+            }
+
+            // Find and update existing comment, or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('dropkit Registry Build')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Fail if validation failed
+        if: steps.validate.outcome == 'failure'
+        run: exit 1
+
+  # ── Build & commit on merge to main ───────────────────────────
+
+  build:
+    name: Build & Commit Registry
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build registry
+        run: node scripts/build-registry.js --verbose
+
+      - name: Check for changes
+        id: changes
+        run: |
+          # Catch both modified (tracked) and new (untracked) registry.json
+          if git diff --quiet registry.json 2>/dev/null && ! git ls-files --others --exclude-standard | grep -q '^registry.json
+
+      - name: Commit registry.json
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add registry.json
+          git commit -m "chore: rebuild registry.json [skip ci]"
+          git push
+
+      - name: Upload registry artifact
+        if: steps.changes.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry
+          path: registry.json
+          retention-days: 90
+; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit registry.json
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add registry.json
+          git commit -m "chore: rebuild registry.json [skip ci]"
+          git push
+
+      - name: Upload registry artifact
+        if: steps.changes.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry
+          path: registry.json
+          retention-days: 90
