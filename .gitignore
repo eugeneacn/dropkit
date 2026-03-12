@@ -1,2 +1,9 @@
 # Ignore OS files
 .DS_Store
+<<<<<<< main
+
+# Claude Code
+CLAUDE.md
+.claude/
+=======
+>>>>>>> main
