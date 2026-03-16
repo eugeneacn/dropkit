@@ -1,3 +1,10 @@
+---
+name: xlsx-to-markdown
+description: Convert Excel (.xls/.xlsx) spreadsheet files to Markdown tables, one table per sheet. Use when the user wants to convert, export, or read an Excel spreadsheet or .xlsx/.xls file into Markdown format.
+metadata:
+  version: "1.0"
+---
+
 # Excel to Markdown Converter
 
 Convert an Excel (.xls/.xlsx) file to clean Markdown tables.
@@ -16,61 +23,10 @@ npm list xlsx || npm install xlsx
 
 ### Step 2: Convert the file
 
-Run this Node.js script, replacing `$ARGUMENTS` with the input file path:
+Run the conversion script, replacing `$ARGUMENTS` with the input file path:
 
 ```bash
-node -e "
-const XLSX = require('xlsx');
-const fs = require('fs');
-const path = require('path');
-
-const filePath = '$ARGUMENTS';
-const wb = XLSX.readFile(filePath);
-const baseName = path.basename(filePath).replace(/\.(xlsx?|csv)$/i, '');
-const results = [];
-
-wb.SheetNames.forEach(name => {
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
-  if (!rows.length) { results.push({ sheet: name, status: 'empty' }); return; }
-
-  // Find the header row (first row with content)
-  let hdrIdx = rows.findIndex(r => r.some(c => String(c).trim() !== ''));
-  if (hdrIdx === -1) { results.push({ sheet: name, status: 'empty' }); return; }
-
-  const headers = rows[hdrIdx].map(c => String(c).trim() || '—');
-  const dataRows = rows.slice(hdrIdx + 1).filter(r => r.some(c => String(c).trim() !== ''));
-  const colCount = headers.length;
-
-  // Build Markdown table
-  let md = '# ' + name + '\n\n';
-  md += '| ' + headers.join(' | ') + ' |\n';
-  md += '| ' + headers.map(() => '---').join(' | ') + ' |\n';
-  dataRows.forEach(r => {
-    const cells = [];
-    for (let i = 0; i < colCount; i++) {
-      let v = r[i] !== undefined ? String(r[i]).trim() : '';
-      v = v.replace(/\|/g, '\\\\|').replace(/\n/g, ' ');
-      cells.push(v);
-    }
-    md += '| ' + cells.join(' | ') + ' |\n';
-  });
-
-  results.push({ sheet: name, rows: dataRows.length, cols: colCount, status: 'ok' });
-
-  // Write one .md per sheet if multi-sheet, otherwise single file
-  if (wb.SheetNames.length > 1) {
-    const outFile = baseName + '_' + name.replace(/[^a-zA-Z0-9]/g, '_') + '.md';
-    fs.writeFileSync(outFile, md);
-    console.log('WROTE: ' + outFile);
-  } else {
-    const outFile = baseName + '.md';
-    fs.writeFileSync(outFile, md);
-    console.log('WROTE: ' + outFile);
-  }
-});
-
-console.log('SUMMARY: ' + JSON.stringify(results));
-"
+node scripts/convert.js "$ARGUMENTS"
 ```
 
 ### Step 3: Report the result

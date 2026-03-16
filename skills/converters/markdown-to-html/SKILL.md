@@ -1,6 +1,8 @@
 ---
 name: markdown-to-html
 description: Use when converting an existing markdown file into a polished, scrollable HTML document with sidebar navigation. Trigger on requests to render, convert, or export a .md file to HTML, produce a shareable web-page version of a document, or generate a readable HTML report — not for slides, presentations, or pitch decks.
+metadata:
+  version: "1.0"
 ---
 
 # Markdown to HTML

@@ -1,3 +1,10 @@
+---
+name: msg-to-markdown
+description: Convert Outlook .msg email files to Markdown, preserving email headers (From, To, CC, Date), body content, and attachment metadata. Use when the user wants to convert, read, or process a .msg email file into Markdown format.
+metadata:
+  version: "1.0"
+---
+
 # Outlook MSG to Markdown Converter
 
 Convert Outlook `.msg` email files to clean, structured Markdown preserving headers, body, and attachment metadata.
@@ -22,242 +29,18 @@ npm list msgreader || npm install msgreader
 
 ### Step 2: Extract the email data
 
-Run this Node.js script, replacing `$ARGUMENTS` with the input file path:
+Run the conversion script, replacing `$ARGUMENTS` with the input file path:
 
 ```bash
-node -e "
-const fs = require('fs');
-const path = require('path');
-
-let MsgReader;
-try {
-  MsgReader = require('@nicecode/msg-reader').default || require('@nicecode/msg-reader');
-} catch {
-  MsgReader = require('msgreader').default || require('msgreader');
-}
-
-const filePath = '$ARGUMENTS';
-const buf = fs.readFileSync(filePath);
-const reader = new MsgReader(buf);
-const msg = reader.getFileData();
-
-// ── Helper: clean HTML body to Markdown ──
-
-function htmlToMd(html) {
-  if (!html) return '';
-  let md = html;
-
-  // Remove style/script blocks
-  md = md.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-  md = md.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
-
-  // Headers
-  for (let i = 6; i >= 1; i--) {
-    md = md.replace(new RegExp('<h' + i + '[^>]*>([\\\\s\\\\S]*?)<\\/h' + i + '>', 'gi'),
-      (_, c) => '#'.repeat(i) + ' ' + c.replace(/<[^>]+>/g, '').trim() + '\\n\\n');
-  }
-
-  // Bold & italic
-  md = md.replace(/<(strong|b)>([\s\S]*?)<\/\1>/gi, '**$2**');
-  md = md.replace(/<(em|i)>([\s\S]*?)<\/\1>/gi, '*$2*');
-
-  // Links
-  md = md.replace(/<a\s+[^>]*href=\"([^\"]*)\"[^>]*>([\s\S]*?)<\/a>/gi, '[$2]($1)');
-
-  // Unordered lists
-  md = md.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, inner) =>
-    inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, li) => '- ' + li.replace(/<[^>]+>/g, '').trim() + '\\n') + '\\n');
-
-  // Ordered lists
-  let counter = 0;
-  md = md.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, inner) => {
-    counter = 0;
-    return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi,
-      (_, li) => (++counter) + '. ' + li.replace(/<[^>]+>/g, '').trim() + '\\n') + '\\n';
-  });
-
-  // Tables
-  md = md.replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (_, tbl) => {
-    const rows = [];
-    let m, rm = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    while (m = rm.exec(tbl)) {
-      const cells = [];
-      let cm, cr = /<(td|th)[^>]*>([\s\S]*?)<\/\1>/gi;
-      while (cm = cr.exec(m[1])) cells.push(cm[2].replace(/<[^>]+>/g, '').trim());
-      rows.push(cells);
-    }
-    if (!rows.length) return '';
-    const hdr = '| ' + rows[0].join(' | ') + ' |';
-    const sep = '| ' + rows[0].map(() => '---').join(' | ') + ' |';
-    const body = rows.slice(1).map(r => '| ' + r.join(' | ') + ' |').join('\\n');
-    return '\\n' + hdr + '\\n' + sep + '\\n' + body + '\\n\\n';
-  });
-
-  // Line breaks and paragraphs
-  md = md.replace(/<br\s*\/?>/gi, '\\n');
-  md = md.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, '$1\\n\\n');
-  md = md.replace(/<div[^>]*>([\s\S]*?)<\/div>/gi, '$1\\n');
-
-  // Strip remaining tags
-  md = md.replace(/<[^>]+>/g, '');
-
-  // Decode entities
-  md = md.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\").replace(/&nbsp;/g, ' ')
-    .replace(/&#\d+;/g, '');
-
-  return md.replace(/\\n{3,}/g, '\\n\\n').trim();
-}
-
-// ── Build Markdown output ──
-
-let md = '';
-
-// Email metadata header block
-md += '# ' + (msg.subject || 'No Subject') + '\\n\\n';
-
-md += '| Field | Value |\\n';
-md += '| --- | --- |\\n';
-md += '| **From** | ' + (msg.senderName || '') + (msg.senderEmail ? ' <' + msg.senderEmail + '>' : '') + ' |\\n';
-
-// Recipients
-const toRecipients = (msg.recipients || []).filter(r => r.recipType === 'to' || r.recipType === 1 || !r.recipType);
-const ccRecipients = (msg.recipients || []).filter(r => r.recipType === 'cc' || r.recipType === 2);
-const bccRecipients = (msg.recipients || []).filter(r => r.recipType === 'bcc' || r.recipType === 3);
-
-function formatRecipients(list) {
-  return list.map(r => (r.name || '') + (r.email ? ' <' + r.email + '>' : '')).join('; ') || '—';
-}
-
-md += '| **To** | ' + formatRecipients(toRecipients.length ? toRecipients : msg.recipients || []) + ' |\\n';
-if (ccRecipients.length) md += '| **CC** | ' + formatRecipients(ccRecipients) + ' |\\n';
-if (bccRecipients.length) md += '| **BCC** | ' + formatRecipients(bccRecipients) + ' |\\n';
-
-// Date
-const dateStr = msg.messageDeliveryTime || msg.clientSubmitTime || msg.creationTime || '';
-if (dateStr) md += '| **Date** | ' + dateStr + ' |\\n';
-
-// Importance
-if (msg.importance && msg.importance !== 'normal' && msg.importance !== 1) {
-  md += '| **Importance** | ' + msg.importance + ' |\\n';
-}
-
-md += '\\n---\\n\\n';
-
-// ── Email body ──
-
-let body = '';
-if (msg.htmlBody || msg.html) {
-  body = htmlToMd(msg.htmlBody || msg.html);
-} else if (msg.body) {
-  body = msg.body;
-}
-
-if (body) {
-  md += body + '\\n\\n';
-} else {
-  md += '*No message body found.*\\n\\n';
-}
-
-// ── Attachments ──
-
-const attachments = msg.attachments || [];
-if (attachments.length > 0) {
-  md += '---\\n\\n';
-  md += '## Attachments\\n\\n';
-  md += '| # | Filename | Size | Type |\\n';
-  md += '| --- | --- | --- | --- |\\n';
-  attachments.forEach((att, i) => {
-    const name = att.fileName || att.name || 'unnamed';
-    const ext = path.extname(name).toLowerCase();
-    const size = att.contentLength || att.dataSize || att.content?.length || '—';
-    const sizeStr = typeof size === 'number'
-      ? (size > 1048576 ? (size / 1048576).toFixed(1) + ' MB'
-        : size > 1024 ? (size / 1024).toFixed(1) + ' KB'
-        : size + ' B')
-      : String(size);
-    const isInline = att.contentId || att.isInline ? ' (inline)' : '';
-    md += '| ' + (i + 1) + ' | ' + name + isInline + ' | ' + sizeStr + ' | ' + (ext || '—') + ' |\\n';
-  });
-  md += '\\n';
-}
-
-// ── Embedded MSG (forwarded/attached emails) ──
-
-const embeddedMsgs = attachments.filter(a =>
-  (a.fileName || a.name || '').toLowerCase().endsWith('.msg') || a.attachmentType === 'msg'
-);
-if (embeddedMsgs.length > 0) {
-  md += '> **Note:** This email contains ' + embeddedMsgs.length + ' embedded message(s). ';
-  md += 'Run this skill on the extracted .msg file(s) to convert them as well.\\n\\n';
-}
-
-// ── Write output ──
-
-const outFile = path.basename(filePath).replace(/\.msg$/i, '') + '.md';
-fs.writeFileSync(outFile, md);
-
-// Summary for the agent
-const summary = {
-  subject: msg.subject || 'No Subject',
-  from: msg.senderName || msg.senderEmail || 'Unknown',
-  to: formatRecipients(toRecipients.length ? toRecipients : msg.recipients || []),
-  date: dateStr || 'Unknown',
-  hasHtmlBody: !!(msg.htmlBody || msg.html),
-  hasPlainBody: !!msg.body,
-  bodyLength: body.length,
-  attachmentCount: attachments.length,
-  embeddedMsgCount: embeddedMsgs.length,
-  ccCount: ccRecipients.length,
-  bccCount: bccRecipients.length
-};
-
-console.log('WROTE: ' + outFile);
-console.log('SUMMARY: ' + JSON.stringify(summary));
-"
+node scripts/convert.js "$ARGUMENTS"
 ```
 
 ### Step 3: Extract attachments (if requested)
 
-If the user asks to extract attachments, run a follow-up script:
+If the user asks to extract attachments, run the attachments script:
 
 ```bash
-node -e "
-const fs = require('fs');
-const path = require('path');
-
-let MsgReader;
-try {
-  MsgReader = require('@nicecode/msg-reader').default || require('@nicecode/msg-reader');
-} catch {
-  MsgReader = require('msgreader').default || require('msgreader');
-}
-
-const filePath = '$ARGUMENTS';
-const buf = fs.readFileSync(filePath);
-const reader = new MsgReader(buf);
-const msg = reader.getFileData();
-const attachments = msg.attachments || [];
-
-if (attachments.length === 0) {
-  console.log('No attachments to extract.');
-  process.exit(0);
-}
-
-const outDir = path.basename(filePath, '.msg') + '_attachments';
-if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-
-attachments.forEach((att, i) => {
-  const name = att.fileName || att.name || ('attachment_' + (i + 1));
-  const content = reader.getAttachment(i);
-  if (content && content.content) {
-    fs.writeFileSync(path.join(outDir, name), Buffer.from(content.content));
-    console.log('EXTRACTED: ' + path.join(outDir, name));
-  } else {
-    console.log('SKIPPED (no content): ' + name);
-  }
-});
-"
+node scripts/extract-attachments.js "$ARGUMENTS"
 ```
 
 ### Step 4: Report the result
