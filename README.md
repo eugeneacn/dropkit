@@ -22,6 +22,7 @@ Each skill is a self-contained folder under `skills/<category>/<skill-name>/` wi
 | [pptx-to-markdown](skills/converters/pptx-to-markdown/) | converters | Convert PowerPoint files to Markdown preserving slide hierarchy, titles, bullet nesting, tables, and speaker notes. | npm `jszip`, `fast-xml-parser` |
 | [xlsx-to-markdown](skills/converters/xlsx-to-markdown/) | converters | Convert Excel spreadsheets to Markdown tables with multi-sheet support, header detection, and date formatting. | npm `xlsx` |
 | [confluence-crawler](skills/crawlers/confluence-crawler/) | crawlers | Crawl an authenticated Confluence space (Cloud or Server/DC) by hierarchy and convert pages to Markdown with frontmatter. Handles macros, attachments, link rewriting, depth limits, and idempotent re-crawling. | pip (see `requirements.txt`) |
+| [jira-align](skills/integrations/jira-align/) | integrations | Read and mutate Jira Align REST API 2.0 (Cloud or self-hosted) — get/list/search, create/update (PUT or PATCH)/delete, and raw calls. OData `$filter` / `$select` / `$orderby` / `expand`, automatic pagination, JSON-parsed `--field KEY=VALUE` inputs, JSON/JSONL/CSV output. Bearer-token auth; agent never sees the token; `delete` requires `--yes`. | pip (see `requirements.txt`) |
 
 ---
 
@@ -186,6 +187,49 @@ Crawl an authenticated Confluence space and write each page as Markdown with YAM
   - *"Re-crawl ENG, forcing a refresh of every page."* (uses `--force`)
 
 Flags: `--space KEY` (required), `--root PAGE_ID`, `--depth N`, `--output DIR`, `--force`, `--no-attachments`, `--concurrency N`, `--insecure`, `--check`, `--verbose`. The API token is never accepted on the command line.
+
+### jira-align
+
+Read and mutate Jira Align (Cloud or self-hosted) via the REST API 2.0 — fetch, list, filter, create, update, and delete records. Returns results as JSON/JSONL/CSV; automatic pagination; OData-style filtering.
+
+- **Install deps**: `python -m pip install -r skills/integrations/jira-align/requirements.txt`
+- **Get an access token** (required before running setup; same flow for both flavors):
+
+  1. Sign in to your Jira Align instance (Cloud at `https://<site>.jiraalign.com`, or your self-hosted URL).
+  2. Click your avatar in the top navigation bar → **Profile**.
+  3. On the Profile page, find the **API Token** section and click **Generate** (or **Regenerate** if one already exists).
+  4. Copy the token value — it is only shown once. Tokens do not expire by time; they remain valid until regenerated or until the user is deactivated.
+
+  If you are on self-hosted and the API Token section is missing, ask an administrator: some on-prem installs require `EnableApiTokens` to be turned on in the system configuration before users can generate tokens.
+
+- **One-time setup** (interactive — prompts for base URL and the token; writes `~/.config/dropkit/credentials.env` at mode 0600, merged with any existing dropkit credentials):
+
+  ```bash
+  bash skills/integrations/jira-align/scripts/setup_credentials.sh
+  ```
+
+- **Verify connectivity**:
+
+  ```bash
+  python skills/integrations/jira-align/scripts/jira_align.py check
+  ```
+
+- **Example prompts**:
+  - *"Show me the 20 most recently modified in-progress features in program 42."*
+  - *"Export every team to `teams.jsonl`."*
+  - *"Fetch epic 1001 with the owner and milestones expanded."*
+  - *"Create a new feature titled 'Onboarding revamp' in program 42 owned by user 77 at 8 points."*
+  - *"Change feature 789's state to In Progress and set points to 13."*
+
+Subcommands: `check`, `whoami`, `get RESOURCE ID`, `list RESOURCE [--filter --select --orderby --expand --limit --page-size]`, `search RESOURCE QUERY`, `create RESOURCE [--data-file FILE] [--field KEY=VALUE]`, `update RESOURCE ID [--method PUT|PATCH] [--data-file FILE] [--field KEY=VALUE]`, `delete RESOURCE ID --yes`, `raw METHOD PATH [--param k=v] [--data-file FILE]`. Global flags: `--format json|jsonl|csv`, `--output FILE`, `--insecure`, `--verbose`. `--field` values are JSON-parsed (so `--field points=8` sends an integer). The API token is never accepted on the command line; `delete` refuses to run without `--yes`.
+
+---
+
+## Shared credential file
+
+Skills that call authenticated third-party APIs read their secrets from a shared file at `~/.config/dropkit/credentials.env` (mode 0600). Each skill namespaces its keys (e.g. `JIRAALIGN_*` for jira-align). Re-running any skill's `setup_credentials.sh` only rewrites that skill's own keys — other skills' entries are preserved. The legacy per-skill path `~/.config/confluence-crawler/config.env` is still read for backward compatibility.
+
+Environment variables of the same name always take precedence over the file, which makes CI use straightforward: set the vars in the job and skip the setup script entirely.
 
 ---
 

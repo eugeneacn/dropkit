@@ -313,8 +313,15 @@ def load_credentials() -> Credentials:
     }
 
     config_dir = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
-    config_file = config_dir / "confluence-crawler" / "config.env"
-    if config_file.is_file():
+    # Prefer the shared dropkit credential file; fall back to the legacy
+    # per-skill path so existing installs keep working.
+    candidate_files = [
+        config_dir / "dropkit" / "credentials.env",
+        config_dir / "confluence-crawler" / "config.env",
+    ]
+    for config_file in candidate_files:
+        if not config_file.is_file():
+            continue
         try:
             from dotenv import dotenv_values
         except ImportError as exc:

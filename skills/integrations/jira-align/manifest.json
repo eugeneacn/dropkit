@@ -1,0 +1,31 @@
+{
+  "id": "jira-align",
+  "name": "Jira Align Client",
+  "version": "1.0.0",
+  "description": "Read and query Jira Align (Atlassian Cloud or self-hosted/on-prem) via the REST API 2.0 using a Personal API Token. Exposes get/list/search/raw subcommands with OData-style filtering, selection, expansion, ordering, and automatic pagination. The agent never sees the token.",
+  "category": "integrations",
+  "tags": ["jira-align", "atlassian", "rest-api", "portfolio", "agile", "authenticated"],
+  "author": "dropkit",
+  "license": "MIT",
+  "deps": {
+    "pip": [
+      "httpx>=0.27",
+      "python-dotenv>=1.0"
+    ]
+  },
+  "input": {
+    "arguments": "a subcommand and its arguments (e.g., list epics --filter \"state eq 'In Progress'\" --limit 50 --output epics.json)",
+    "env": {
+      "JIRAALIGN_BASE_URL": "Base URL. Cloud: https://<site>.jiraalign.com. On-prem: https://jiraalign.corp.example.com",
+      "JIRAALIGN_API_TOKEN": "Personal API Token from Jira Align Profile page — populated by setup_credentials.sh, never passed on CLI",
+      "JIRAALIGN_FLAVOR": "Optional: cloud | onprem (auto-detected from URL by default; auth is identical either way)"
+    }
+  },
+  "output": {
+    "fileTypes": [".json", ".jsonl", ".csv"],
+    "layout": "JSON to stdout by default; --output writes to a file in the chosen --format"
+  },
+  "targets": {
+    "default": { "file": "SKILL.md" }
+  }
+}
