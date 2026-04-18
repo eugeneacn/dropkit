@@ -22,7 +22,7 @@ Each skill is a self-contained folder under `skills/<category>/<skill-name>/` wi
 | [pptx-to-markdown](skills/converters/pptx-to-markdown/) | converters | Convert PowerPoint files to Markdown preserving slide hierarchy, titles, bullet nesting, tables, and speaker notes. | npm `jszip`, `fast-xml-parser` |
 | [xlsx-to-markdown](skills/converters/xlsx-to-markdown/) | converters | Convert Excel spreadsheets to Markdown tables with multi-sheet support, header detection, and date formatting. | npm `xlsx` |
 | [confluence-crawler](skills/crawlers/confluence-crawler/) | crawlers | Crawl an authenticated Confluence space (Cloud or Server/DC) by hierarchy and convert pages to Markdown with frontmatter. Handles macros, attachments, link rewriting, depth limits, and idempotent re-crawling. | pip (see `requirements.txt`) |
-| [jira-align](skills/integrations/jira-align/) | integrations | Read and mutate Jira Align REST API 2.0 (Cloud or self-hosted) — get/list/search, create/update (PUT or PATCH)/delete, and raw calls. OData `$filter` / `$select` / `$orderby` / `expand`, automatic pagination, JSON-parsed `--field KEY=VALUE` inputs, JSON/JSONL/CSV output. Bearer-token auth; agent never sees the token; `delete` requires `--yes`. | pip (see `requirements.txt`) |
+| [jira-align](skills/integrations/jira-align/) | integrations | Read and write Jira Align (Cloud or self-hosted) from chat — fetch, filter, and export epics, features, stories, teams, and more; create and update records; delete with confirmation. Exports as JSON, JSONL, or CSV. The agent never sees your API token. | pip (see `requirements.txt`) |
 
 ---
 
@@ -190,7 +190,7 @@ Flags: `--space KEY` (required), `--root PAGE_ID`, `--depth N`, `--output DIR`, 
 
 ### jira-align
 
-Read and mutate Jira Align (Cloud or self-hosted) via the REST API 2.0 — fetch, list, filter, create, update, and delete records. Returns results as JSON/JSONL/CSV; automatic pagination; OData-style filtering.
+Talk to Jira Align from chat. Ask for records, filter collections, or make changes, and the skill dispatches the right REST API call for you. Works against Atlassian Cloud and self-hosted instances.
 
 - **Install deps**: `python -m pip install -r skills/integrations/jira-align/requirements.txt`
 - **Get an access token** (required before running setup; same flow for both flavors):
@@ -216,12 +216,26 @@ Read and mutate Jira Align (Cloud or self-hosted) via the REST API 2.0 — fetch
 
 - **Example prompts**:
   - *"Show me the 20 most recently modified in-progress features in program 42."*
-  - *"Export every team to `teams.jsonl`."*
   - *"Fetch epic 1001 with the owner and milestones expanded."*
+  - *"Export every team to `teams.jsonl`."*
   - *"Create a new feature titled 'Onboarding revamp' in program 42 owned by user 77 at 8 points."*
   - *"Change feature 789's state to In Progress and set points to 13."*
 
-Subcommands: `check`, `whoami`, `get RESOURCE ID`, `list RESOURCE [--filter --select --orderby --expand --limit --page-size]`, `search RESOURCE QUERY`, `create RESOURCE [--data-file FILE] [--field KEY=VALUE]`, `update RESOURCE ID [--method PUT|PATCH] [--data-file FILE] [--field KEY=VALUE]`, `delete RESOURCE ID --yes`, `raw METHOD PATH [--param k=v] [--data-file FILE]`. Global flags: `--format json|jsonl|csv`, `--output FILE`, `--insecure`, `--verbose`. `--field` values are JSON-parsed (so `--field points=8` sends an integer). The API token is never accepted on the command line; `delete` refuses to run without `--yes`.
+- **What the skill can do**:
+
+  | Action | Example |
+  |---|---|
+  | Fetch one record | `get epics 1001` |
+  | List / filter a collection | `list features --filter "state eq 'In Progress'" --limit 20` |
+  | Search shortcut | `search stories "title contains 'login'"` |
+  | Create a record | `create features --field title="Onboarding revamp" --field points=8` |
+  | Update a record | `update features 789 --method PATCH --field state="In Progress"` |
+  | Delete a record | `delete stories 5432 --yes` |
+  | Anything else | `raw GET features/789/stories` |
+
+  Output format is selectable with `--format json|jsonl|csv`, and `--output FILE` writes to disk instead of stdout. For create and update, `--field KEY=VALUE` values are JSON-parsed, so `--field points=8` sends an integer, `--field isActive=true` sends a boolean, and anything that fails to parse is sent as a string.
+
+- **Safety**: the API token is never accepted on the command line, `delete` refuses to run without `--yes`, and the agent is instructed to confirm any create/update/delete before executing it.
 
 ---
 
@@ -244,8 +258,22 @@ dropkit/
         SKILL.md          # agent playbook
         scripts/          # executable logic
         requirements.txt  # (when pip-based)
+        evals/            # expected-behavior tests
   scripts/                # repo-level tooling
   targets/                # IDE-specific output helpers
 ```
 
-Contributions: add a new skill under the appropriate category (or create one). Match the existing manifest shape and keep agent instructions in `SKILL.md` thin — the scripts should own the logic.
+---
+
+## Contributing
+
+To add a new skill:
+
+1. **Pick a category.** Reuse one of the existing folders under `skills/` (`contracts`, `converters`, `crawlers`, `integrations`) or create a new one if nothing fits.
+2. **Create the skill folder** at `skills/<category>/<skill-name>/`.
+3. **Write `manifest.json`.** Match the shape of existing skills — `id`, `name`, `version`, `description`, `category`, `tags`, `deps`, `input`, `output`, and `targets`.
+4. **Write `SKILL.md`.** Keep it thin: describe *when* to use the skill and *how* to dispatch to its scripts. Don't reimplement logic in prose.
+5. **Put the real work in `scripts/`.** The agent should call into scripts, not duplicate them.
+6. **Declare dependencies.** Use `deps.pip` (plus a `requirements.txt`) or `deps.npm` in the manifest.
+7. **Add evals.** Drop an `evals/evals.json` that documents prompts, expected behavior, and assertions (see existing skills for the format).
+8. **Update the catalog** row and usage section in this README.
