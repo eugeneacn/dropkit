@@ -281,6 +281,18 @@ Talk to Jira Align from chat. Ask for records, filter collections, or make chang
 
 ---
 
+## What this repo writes outside its own directory
+
+The skills are conservative about side effects. The full list of paths a dropkit skill can touch outside the repo:
+
+- `~/.config/dropkit/credentials.env` (mode 0600) — created and rewritten only by `setup_credentials.sh` on your explicit invocation. Holds API tokens for the authenticated skills (jira, jira-align). One file per machine, shared across skills, namespaced keys.
+- `~/.config/confluence-crawler/config.env` (mode 0600) — legacy path, same shape as the dropkit shared file, kept for backward compatibility.
+- The skill's own working directory (`scripts/` or wherever you run from) for output files like converted Markdown or JSONL exports — and only when you ask for an output path.
+
+No daemons, no system installs, no telemetry, no background processes, no `~/.bashrc` edits, no global npm or pip installs. The `quickstart.sh` and the per-skill `setup_credentials.sh` are the only scripts that write to your system at all, and both run only when you invoke them.
+
+Mutating skills (jira create / update / delete, jira-align create / update / delete, etc.) require explicit user confirmation — `--yes` is never inferred from intent, and the agent is instructed to confirm payload and target with you before any non-read operation. The complete pattern is documented in [`references/auth-rules.md`](references/auth-rules.md).
+
 ## Shared credential file
 
 Skills that call authenticated third-party APIs read their secrets from a shared file at `~/.config/dropkit/credentials.env` (mode 0600). Each skill namespaces its keys (e.g. `JIRAALIGN_*` for jira-align). Re-running any skill's `setup_credentials.sh` only rewrites that skill's own keys — other skills' entries are preserved. The legacy per-skill path `~/.config/confluence-crawler/config.env` is still read for backward compatibility.

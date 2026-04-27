@@ -54,16 +54,15 @@ All keys may be overridden by matching environment variables.
 
 ### Security rules (non-negotiable)
 
-- Secrets live only in `~/.config/dropkit/credentials.env` (mode 0600) or
-  environment variables.
-- **Never** read that file, print its contents, or echo the token. It is
-  not yours to see.
-- **Never** accept the token on the command line. The CLI refuses flags
-  like `--token`, `--api-token`, `--bearer`, `--pat` and exits with an
-  error.
-- If credentials are missing or invalid, instruct the user to run
-  `scripts/setup_credentials.sh` themselves — do not run it for them (it
-  prompts interactively).
+- Secrets live only in `~/.config/dropkit/credentials.env` (mode 0600)
+  or environment variables. **Never** read that file, print it, or echo
+  the token.
+- **Never** put the token on the command line. The CLI refuses flags
+  like `--token` / `--api-token` / `--bearer` / `--pat` and exits — do
+  not work around it.
+- If `check` exits 2 (missing or invalid creds), tell the user to run
+  `bash scripts/setup_credentials.sh` themselves. It's interactive — do
+  not run it for them.
 
 ### Step 1: Verify the environment
 
@@ -200,14 +199,12 @@ first with `list-users --query "<email or name>"` on Cloud, or with
 
 ### Examples
 
+Three canonical patterns inline. For everything else (whoami, get-issue,
+update-issue, comment, attach, list-projects, list-users, raw, delete-issue,
+worklog) see [`references/examples.md`](references/examples.md), loaded
+on demand.
+
 ```bash
-# Who am I?
-python scripts/jira.py whoami
-
-# One issue, just the basics
-python scripts/jira.py get-issue PROJ-123 \
-  --fields "summary,status,assignee,priority"
-
 # JQL: 50 most recently created bugs in PROJ, as JSONL on disk
 python scripts/jira.py search \
   "project = PROJ AND issuetype = Bug ORDER BY created DESC" \
@@ -221,29 +218,8 @@ python scripts/jira.py create-issue \
   --field 'issuetype={"name":"Task"}' \
   --field description="Migrate the welcome flow to the new tour."
 
-# Partial update: change summary and add a label
-python scripts/jira.py update-issue PROJ-123 \
-  --field summary="Onboarding revamp v2" \
-  --field 'labels=["urgent","onboarding"]'
-
 # Apply a transition by name
-python scripts/jira.py list-transitions PROJ-123
 python scripts/jira.py transition PROJ-123 --to "In Progress"
-
-# Add a comment
-python scripts/jira.py comment PROJ-123 --body "Pushed the fix in #4567."
-
-# Upload a screenshot
-python scripts/jira.py attach PROJ-123 --file ./screenshot.png
-
-# Get every project, paginated automatically
-python scripts/jira.py list-projects --format jsonl --output projects.jsonl
-
-# Endpoint not wrapped (e.g. worklog on a specific issue)
-python scripts/jira.py raw GET issue/PROJ-123/worklog
-
-# Delete an issue (only after explicit user confirmation)
-python scripts/jira.py delete-issue PROJ-123 --yes
 ```
 
 ### Don't
