@@ -22,6 +22,7 @@ Each skill is a self-contained folder under `skills/<category>/<skill-name>/` wi
 | [pptx-to-markdown](skills/converters/pptx-to-markdown/) | converters | Convert PowerPoint files to Markdown preserving slide hierarchy, titles, bullet nesting, tables, and speaker notes. | npm `jszip`, `fast-xml-parser` |
 | [xlsx-to-markdown](skills/converters/xlsx-to-markdown/) | converters | Convert Excel spreadsheets to Markdown tables with multi-sheet support, header detection, and date formatting. | npm `xlsx` |
 | [confluence-crawler](skills/crawlers/confluence-crawler/) | crawlers | Crawl an authenticated Confluence space (Cloud or Server/DC) by hierarchy and convert pages to Markdown with frontmatter. Handles macros, attachments, link rewriting, depth limits, and idempotent re-crawling. | pip (see `requirements.txt`) |
+| [jira](skills/integrations/jira/) | integrations | Read and write Jira (Cloud or Server / Data Center) from chat — JQL search, fetch / create / update / delete issues, apply transitions, add comments and attachments, list projects and users. Auto-handles Cloud (REST v3, basic auth, ADF, nextPageToken) vs Server (REST v2, bearer PAT, plain text, startAt). Exports as JSON, JSONL, or CSV. The agent never sees your API token. | pip (see `requirements.txt`) |
 | [jira-align](skills/integrations/jira-align/) | integrations | Read and write Jira Align (Cloud or self-hosted) from chat — fetch, filter, and export epics, features, stories, teams, and more; create and update records; delete with confirmation. Exports as JSON, JSONL, or CSV. The agent never sees your API token. | pip (see `requirements.txt`) |
 
 ---
@@ -187,6 +188,56 @@ Crawl an authenticated Confluence space and write each page as Markdown with YAM
   - *"Re-crawl ENG, forcing a refresh of every page."* (uses `--force`)
 
 Flags: `--space KEY` (required), `--root PAGE_ID`, `--depth N`, `--output DIR`, `--force`, `--no-attachments`, `--concurrency N`, `--insecure`, `--check`, `--verbose`. The API token is never accepted on the command line.
+
+### jira
+
+Talk to Jira (the issue tracker, **not** Jira Align — those are separate skills) from chat. Ask for issues by key or JQL, create and update issues, transition workflow states, comment, attach files, and list projects or users. Works against Atlassian Cloud (REST v3) and self-hosted Server / Data Center (REST v2); the skill handles the auth, API version, ADF wrapping, and pagination differences automatically.
+
+- **Install deps**: `python -m pip install -r skills/integrations/jira/requirements.txt`
+- **Get an access token**:
+
+  - **Atlassian Cloud** — go to https://id.atlassian.com/manage-profile/security/api-tokens, click **Create API token**, name it, and copy the value. Authentication uses your Atlassian account email plus this token (Basic auth).
+  - **Server / Data Center (on-prem)** — in Jira, click your avatar → **Profile** → **Personal Access Tokens** → **Create token**. Name the token, set an expiry, click **Create**, and copy the value shown (it is only displayed once). Authentication uses the token as a bearer credential; no email is required.
+
+- **One-time setup** (interactive — prompts for base URL, email if Cloud, and the token; writes `~/.config/dropkit/credentials.env` at mode 0600, merged with any existing dropkit credentials):
+
+  ```bash
+  bash skills/integrations/jira/scripts/setup_credentials.sh
+  ```
+
+- **Verify connectivity**:
+
+  ```bash
+  python skills/integrations/jira/scripts/jira.py check
+  ```
+
+- **Example prompts**:
+  - *"Show me the 50 most recently created bugs in PROJ — just summary, status, priority, created."*
+  - *"Fetch PROJ-123 with renderedFields and changelog expanded."*
+  - *"Export every issue assigned to me to issues.jsonl."*
+  - *"Create a Task in PROJ titled 'Onboarding revamp' with this description …"*
+  - *"Move PROJ-123 to In Progress and add the labels urgent and onboarding."*
+  - *"Add a comment to PROJ-123 saying 'Pushed the fix in #4567.' and attach screenshot.png."*
+
+- **What the skill can do**:
+
+  | Action | Example |
+  |---|---|
+  | Fetch one issue | `get-issue PROJ-123 --fields summary,status` |
+  | JQL search | `search "project = PROJ AND status = 'In Progress'" --limit 50` |
+  | Create an issue | `create-issue --field 'project={"key":"PROJ"}' --field summary="..." --field 'issuetype={"name":"Task"}'` |
+  | Update an issue (PUT, partial) | `update-issue PROJ-123 --field 'labels=["urgent"]'` |
+  | Delete an issue | `delete-issue PROJ-123 --yes` |
+  | Apply a transition | `transition PROJ-123 --to "In Progress"` |
+  | Add a comment | `comment PROJ-123 --body "text"` |
+  | Upload an attachment | `attach PROJ-123 --file ./screenshot.png` |
+  | List projects | `list-projects --query KW` |
+  | Find a user | `list-users --query ada@example.com` |
+  | Anything else | `raw GET issue/PROJ-123/worklog` |
+
+  Output format is selectable with `--format json|jsonl|csv`, and `--output FILE` writes to disk instead of stdout. For create and update, `--field KEY=VALUE` values are JSON-parsed, so `--field 'labels=["a","b"]'` sends an array, `--field 'project={"key":"PROJ"}'` sends an object, and anything that fails to parse is sent as a string.
+
+- **Safety**: the API token is never accepted on the command line, `delete-issue` refuses to run without `--yes`, status changes go through `transition` (Jira ignores `status` in `update-issue` by design), and the agent is instructed to confirm any create/update/delete/transition before executing it.
 
 ### jira-align
 
