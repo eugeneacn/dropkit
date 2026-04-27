@@ -1,13 +1,20 @@
 # dropkit
 
-A portable registry of AI skills and agents. Install into Claude Code, Kiro, Cursor, or any AI-powered IDE by copying a directory.
+Dropkit is a folder of agent playbooks. Each skill is a self-contained directory containing a `SKILL.md` (the agent reads this), a `scripts/` folder (deterministic tooling the agent calls), and a `manifest.json` (deps and I/O). Drop a directory into `~/.claude/skills/` (or your IDE's equivalent) and the skill is installed.
 
-Each skill is a self-contained folder under `skills/<category>/<skill-name>/` with:
+Today the registry covers Atlassian integrations (Jira, Jira Align, Confluence space crawling), file-to-Markdown conversion (PDF, DOCX, XLSX, PPTX, images), Markdown-to-HTML rendering, Outlook `.msg` email conversion, OpenAPI 3.1 contract generation against the Zalando guidelines, and Kafka event schema generation. Heavier work (auth flows, retries, pagination, parsing, multipart uploads) lives in the `scripts/` of each skill, so the agent's job stays small: pick a subcommand, run it, relay the output.
 
-- `SKILL.md` — the agent playbook (what the agent reads and follows)
-- `manifest.json` — machine-readable metadata (id, deps, I/O)
-- `scripts/` — the code the agent invokes; heavy lifting lives here
-- optional `requirements.txt` / package install line declared in the manifest
+## Quickstart
+
+```bash
+git clone https://github.com/eugeneacn/dropkit.git
+cd dropkit
+bash quickstart.sh
+```
+
+Generates a sample diagram, runs the file-to-markdown image analyzer against it, and writes two real artifacts under `examples/`. No API keys, no LLM calls — just proof that the toolchain installs and the skill scripts run on your machine. ~30 seconds.
+
+For a working skill in your IDE, jump to **[Installing a skill into your IDE](#installing-a-skill-into-your-ide)** below.
 
 ## Catalog
 
@@ -15,12 +22,9 @@ Each skill is a self-contained folder under `skills/<category>/<skill-name>/` wi
 |---|---|---|---|
 | [api-contract](skills/contracts/api-contract/) | contracts | Generate OpenAPI 3.1 contracts from natural language, code, or SQL, enforcing 138 Zalando RESTful API Guidelines rules. | none |
 | [kafka-event-schema](skills/contracts/kafka-event-schema/) | contracts | Generate Avro, JSON Schema, or Protobuf event schemas with metadata envelopes, compatibility rules, and Schema Registry integration. | none |
-| [docx-to-markdown](skills/converters/docx-to-markdown/) | converters | Convert Word `.docx` files to clean Markdown preserving headings, lists, tables, and formatting. | npm `mammoth` |
+| [file-to-markdown](skills/converters/file-to-markdown/) | converters | Convert documents (PDF, DOCX, PPTX, XLSX, XLS) and images (PNG, JPG, TIFF, BMP, WEBP, GIF) to Markdown. Documents use Docling for text extraction; images use a two-pass sliding-window vision strategy. | pip `docling`, `Pillow` |
 | [markdown-to-html](skills/converters/markdown-to-html/) | converters | Convert Markdown to styled, self-contained HTML with syntax highlighting, TOC, and responsive layout. | npm `marked`, `highlight.js` |
 | [msg-to-markdown](skills/converters/msg-to-markdown/) | converters | Convert Outlook `.msg` emails to structured Markdown preserving headers, body, and attachment metadata. | npm `@nicecode/msg-reader` |
-| [pdf-to-markdown](skills/converters/pdf-to-markdown/) | converters | Convert PDF files to structured Markdown using positional text extraction to detect headings, paragraphs, lists, and tables. | npm `pdfjs-dist` |
-| [pptx-to-markdown](skills/converters/pptx-to-markdown/) | converters | Convert PowerPoint files to Markdown preserving slide hierarchy, titles, bullet nesting, tables, and speaker notes. | npm `jszip`, `fast-xml-parser` |
-| [xlsx-to-markdown](skills/converters/xlsx-to-markdown/) | converters | Convert Excel spreadsheets to Markdown tables with multi-sheet support, header detection, and date formatting. | npm `xlsx` |
 | [confluence-crawler](skills/crawlers/confluence-crawler/) | crawlers | Crawl an authenticated Confluence space (Cloud or Server/DC) by hierarchy and convert pages to Markdown with frontmatter. Handles macros, attachments, link rewriting, depth limits, and idempotent re-crawling. | pip (see `requirements.txt`) |
 | [jira](skills/integrations/jira/) | integrations | Read and write Jira (Cloud or Server / Data Center) from chat — JQL search, fetch / create / update / delete issues, apply transitions, add comments and attachments, list projects and users. Auto-handles Cloud (REST v3, basic auth, ADF, nextPageToken) vs Server (REST v2, bearer PAT, plain text, startAt). Exports as JSON, JSONL, or CSV. The agent never sees your API token. | pip (see `requirements.txt`) |
 | [jira-align](skills/integrations/jira-align/) | integrations | Read and write Jira Align (Cloud or self-hosted) from chat — fetch, filter, and export epics, features, stories, teams, and more; create and update records; delete with confirmation. Exports as JSON, JSONL, or CSV. The agent never sees your API token. | pip (see `requirements.txt`) |
@@ -43,11 +47,11 @@ Install a skill by copying its folder — drop the directory directly into the s
 ```bash
 # user-scope (recommended)
 mkdir -p ~/.claude/skills
-cp -R skills/converters/pdf-to-markdown ~/.claude/skills/
+cp -R skills/converters/file-to-markdown ~/.claude/skills/
 
 # project-scope
 mkdir -p .claude/skills
-cp -R skills/converters/pdf-to-markdown .claude/skills/
+cp -R skills/converters/file-to-markdown .claude/skills/
 ```
 
 Claude Code discovers the skill via its `SKILL.md` frontmatter `name` field. Invoke it in chat with `/<skill-name>` or by describing the task — Claude will route to the matching skill automatically.
@@ -119,12 +123,18 @@ Generate a Kafka event schema (Avro / JSON Schema / Protobuf).
 - **Output**: `.avsc`, `.json`, `.proto`, or `.yaml` (AsyncAPI).
 - **Example prompt**: *"Generate an Avro schema for an OrderPlaced event with a standard metadata envelope."*
 
-### docx-to-markdown
+### file-to-markdown
 
-Convert a Word document to Markdown.
+Convert documents and images to Markdown. One skill covers PDF, DOCX, PPTX, XLSX, XLS, and the image formats (PNG, JPG, JPEG, TIFF, BMP, WEBP, GIF).
 
-- **Install deps**: `npm install mammoth`
-- **Example prompt**: *"Convert docs/spec.docx to Markdown."*
+- **Install deps**: `python -m pip install docling Pillow` (first Docling run downloads ML models, ~1–2 min; subsequent runs are fast)
+- **Example prompts**:
+  - *"Convert docs/whitepaper.pdf to Markdown."*
+  - *"Convert decks/q2-review.pptx to Markdown."*
+  - *"Convert data/sales.xlsx to Markdown tables, one per sheet."*
+  - *"Convert architecture-diagram.png to Markdown — it's an event-storming board, extract the sticky notes."*
+
+Documents go through Docling text extraction (`scripts/convert.py`). Images go through a two-pass sliding-window vision pipeline (`scripts/split_image.py`) that tiles the source with overlap so no element is bisected at a tile boundary.
 
 ### markdown-to-html
 
@@ -139,27 +149,6 @@ Convert an Outlook `.msg` email to Markdown.
 
 - **Install deps**: `npm install @nicecode/msg-reader`
 - **Example prompt**: *"Convert inbox/2026-03-customer-escalation.msg to Markdown."*
-
-### pdf-to-markdown
-
-Convert a PDF to Markdown using positional text extraction.
-
-- **Install deps**: `npm install pdfjs-dist@4.7.76`
-- **Example prompt**: *"Convert docs/whitepaper.pdf to Markdown."*
-
-### pptx-to-markdown
-
-Convert a PowerPoint deck to Markdown, preserving slide structure.
-
-- **Install deps**: `npm install jszip fast-xml-parser`
-- **Example prompt**: *"Convert decks/q2-review.pptx to Markdown."*
-
-### xlsx-to-markdown
-
-Convert an Excel spreadsheet to Markdown tables.
-
-- **Install deps**: `npm install xlsx`
-- **Example prompt**: *"Convert data/sales.xlsx to Markdown, one table per sheet."*
 
 ### confluence-crawler
 
@@ -305,13 +294,11 @@ dropkit/
   skills/
     <category>/
       <skill-name>/
-        manifest.json     # metadata + deps + targets
+        manifest.json     # metadata + deps + I/O
         SKILL.md          # agent playbook
         scripts/          # executable logic
         requirements.txt  # (when pip-based)
         evals/            # expected-behavior tests
-  scripts/                # repo-level tooling
-  targets/                # IDE-specific output helpers
 ```
 
 ---
