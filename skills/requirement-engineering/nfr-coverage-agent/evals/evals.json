@@ -1,0 +1,47 @@
+{
+  "skill_name": "nfr-coverage-agent",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Business Process: Required Minimum Distribution Processing. No existing NFRs have been defined. Sub-processes: Identify Eligibility, Calculate RMD Amount, Engage Participant, Validate Elections, Submit Disbursement, Notify Completion, Archive. Please run nfr-coverage-agent.",
+      "expected_output": "Coverage matrix with all 5 primary categories (Security, Performance, Usability, Availability, Disaster Recovery) showing 'None identified' for current coverage, a gap analysis for each, and 2-4 stakeholder questions per category. DR section specifically references the P0-P7 tier standard and asks which tier applies. Reference-only categories each get one status line. No NFR text written — questions only. Summary line: 5 categories with gaps.",
+      "assertions": [
+        "All 5 primary NFR categories have sections in the output",
+        "Every category shows 'None identified' or equivalent for current coverage",
+        "Every category has at least 2 stakeholder questions",
+        "Disaster Recovery section asks which P0-P7 tier applies",
+        "No SLA numbers are invented in the output",
+        "No NFR requirement text is written — only questions",
+        "All 5 reference-only categories appear in the reference-only table",
+        "Summary line is present showing 5 categories with gaps"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Business Process: Required Minimum Distribution Processing. Existing NFRs: 'All participant PII must be encrypted at rest and in transit using AES-256.' 'The RMD calculation batch must complete within a 4-hour processing window.' Sub-processes provided. Please run nfr-coverage-agent.",
+      "expected_output": "Security shows 'AES-256 encryption at rest and in transit' as current coverage — but gaps identified around authorisation, access control, and audit logging. Performance shows 4-hour batch window as current coverage — but gaps around response time for participant-facing interactions. Availability, Usability, and DR all show no coverage with full question lists. Two categories (Security, Performance) show partial coverage, three show full gaps.",
+      "assertions": [
+        "Security section quotes the existing AES-256 requirement as current coverage",
+        "Security section identifies gaps beyond encryption (authorisation, access control, audit)",
+        "Performance section quotes the 4-hour batch window as current coverage",
+        "Performance section identifies gaps for participant-facing response time",
+        "Usability, Availability, and DR sections all show gaps with question lists",
+        "No existing NFR text is rewritten or evaluated for quality",
+        "No SLA numbers are invented"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Business Process: Internal RMD Batch Processing (no user-facing interface, internal operations only). Existing NFRs: 'N/A — This is an internal-only batch process. Usability NFRs do not apply.' Sub-processes are all back-office calculation and archival steps. Please run nfr-coverage-agent.",
+      "expected_output": "Usability section shows 'N/A — Internal-only batch process; no user-facing interface' and does NOT generate stakeholder questions for Usability. Usability is not re-flagged in the gap analysis. All other primary categories (Security, Performance, Availability, DR) still show full assessment. Summary line correctly reflects 1 N/A, 4 with gaps.",
+      "assertions": [
+        "Usability section shows the N/A status with the user-provided reason",
+        "No stakeholder questions are generated for Usability",
+        "Usability is NOT listed as a gap in the summary",
+        "Security, Performance, Availability, and DR are all assessed normally",
+        "Summary correctly counts 1 N/A category",
+        "Agent does not challenge or question the N/A acceptance"
+      ]
+    }
+  ]
+}

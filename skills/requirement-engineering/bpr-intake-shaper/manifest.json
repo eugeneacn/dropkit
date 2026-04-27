@@ -1,0 +1,21 @@
+{
+  "id": "bpr-intake-shaper",
+  "name": "BPR Intake & Shaper",
+  "version": "1.0.0",
+  "description": "Convert raw business inputs (SOPs, meeting notes, intent memos, KE articles) into a structured RKT markdown draft — a Business Process page plus candidate Sub-Process pages. Run once at epic kickoff.",
+  "category": "bpr",
+  "tags": ["rkt", "bpr", "intake", "shaping", "business-process", "epic-kickoff"],
+  "author": "dropkit",
+  "license": "MIT",
+  "deps": {},
+  "input": {
+    "arguments": "paths to source documents (SOPs, meeting notes, intent memos) and the Ubiquitous Language document",
+    "fileTypes": [".md", ".txt", ".pdf", ".docx"]
+  },
+  "output": {
+    "fileTypes": [".md"]
+  },
+  "targets": {
+    "default": { "file": "SKILL.md" }
+  }
+}

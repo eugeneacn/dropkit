@@ -1,0 +1,46 @@
+{
+  "skill_name": "process-cohesion-decomposition",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Here is the street-view map for the RMD process. Business Process: Required Minimum Distribution Processing — end-to-end process for identifying RMD-eligible participants, calculating required amounts, collecting elections, and disbursing funds. Street-view map description: The map has 8 swim lanes — A. IDENTIFY (eligibility check, data retrieval), B. CALCULATE (amount calculation, validation), C. ENGAGE (participant notification, election collection, spousal waiver), D. VALIDATE (election review, waiver confirmation), E. SUBMIT (transaction initiation), F. NOTIFY (completion notification), G. MOVE MONEY (disbursement execution), H. ARCHIVE (record retention). Ubiquitous Language document provided. Please run the decomposition.",
+      "expected_output": "Sub-process decomposition with 8 proposed sub-processes corresponding to the map's phase labels A-H. Each sub-process entry names the grouping heuristic used. A Value-Stream Ownership Grid showing sub-processes against candidate value streams. A Decomposition Seams section if any boundary activities were ambiguous. No activities invented that aren't on the map. Note on whether 8 sub-processes is within the recommended range (it is, but close to the upper limit of 7 — may prompt a flag or note).",
+      "assertions": [
+        "At least 7 sub-processes proposed, corresponding to the map phases",
+        "Each sub-process entry names the heuristic used for grouping",
+        "A Value-Stream Ownership Grid is present",
+        "No activities are invented that are not described in the map",
+        "If the count approaches or exceeds 7, a note about potential granularity is present",
+        "Output includes sub-process names, one-line descriptions, and rationale"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Here are all the RMD Business Process and sub-process pages after we added the new cancellation requirements. Please run a cohesion check. Business Process: Required Minimum Distribution Processing. Sub-processes: Identify Eligibility, Calculate RMD Amount, Engage Participant, Validate Elections, Submit Disbursement, Notify Completion, Archive. Three new requirements have been added: 'When a participant requests to cancel an in-flight RMD, the in-progress disbursement must be halted.', 'If a disbursement is halted, funds must be returned to the participant account within 2 business days.', 'Where a cancellation occurs after Submit but before Move Money, the VS Business Lead must be notified.' Ubiquitous Language document provided.",
+      "expected_output": "Agent first describes the inputs it found (7 sub-processes, 3 new requirements) and what the cohesion check will cover, then asks for confirmation to proceed. After confirmation is assumed for eval purposes, the cohesion report identifies a gap: no sub-process currently covers cancellation between Submit Disbursement and Notify Completion. Finding must be labeled Blocking (the three new requirements are 'homeless' — no sub-process owns them). Proposed remediation: options such as adding a 'Cancel In-Flight RMD' sub-process or absorbing cancellation into Engage with a new start trigger. Other 6 cohesion checks report no gap.",
+      "assertions": [
+        "Agent describes the inputs it detected before running checks",
+        "Agent explains what the 6 checks will cover and asks for confirmation",
+        "A Blocking finding is raised about the missing cancellation sub-process",
+        "Finding references the three new requirements as evidence",
+        "Proposed remediation offers concrete options (add sub-process or absorb into existing)",
+        "Checks 1-6 are all evaluated and reported",
+        "Findings that passed are listed in a 'no findings' table",
+        "No process rewriting is performed — findings only"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "We've just updated the sub-process pages to include the cancellation requirements. Business Process page and all Sub-Process pages attached. Ubiquitous Language document provided.",
+      "expected_output": "Agent detects that BP and SP pages are present. It does not run any cohesion checks. Instead it confirms what it found (n sub-processes), describes what the Cohesion Re-check will do (6 structural checks, Blocking and Advisory findings), and asks whether the user wants to proceed. No findings are produced.",
+      "assertions": [
+        "Agent does NOT produce a cohesion report",
+        "Agent does NOT produce any findings about the process",
+        "Agent summarises the inputs it detected (sub-process count, any requirements present)",
+        "Agent describes what the 6 checks will cover",
+        "Agent asks whether to proceed with the cohesion check",
+        "Response is a question or prompt, not a refusal"
+      ]
+    }
+  ]
+}

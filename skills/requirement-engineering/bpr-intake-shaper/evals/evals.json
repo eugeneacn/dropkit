@@ -1,0 +1,41 @@
+{
+  "skill_name": "bpr-intake-shaper",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Here are three source documents for a new epic: (1) SOP-RMD-001: describes the process for identifying participants approaching RMD eligibility, calculating required minimum distributions, and initiating disbursements; (2) Workshop transcript: stakeholders agreed the process should cover notification, spousal waiver collection, and archival; (3) Ubiquitous Language document: defines 'participant', 'RMD', 'spousal waiver', 'disbursement', 'e-delivery preference'. Business Process name is 'Required Minimum Distribution Processing'. Please run bpr-intake-shaper.",
+      "expected_output": "A markdown file with: (1) a Business Process page table containing all required fields — Business Process Name as 'Required Minimum Distribution Processing', Description summarising the end-to-end RMD flow, Value Stream Owner as TBD, Business Service as TBD, Market Offer as TBD, Impacted Users listing 'participant' and 'plan sponsor', and a Version History stub table; (2) candidate Sub-Process pages for at least Identify, Calculate, Engage/Notify, Validate, Submit/Disburse, and Archive — names and one-line descriptions only; (3) a Discrepancies to Resolve section if any conflicts exist between source documents; (4) no requirements written on sub-process pages.",
+      "assertions": [
+        "All required Business Process page fields are present in the table",
+        "Human-owned fields (Value Stream Owner, Business Service, Market Offer) output as TBD stubs with role names, not invented values",
+        "At least 4 candidate Sub-Process pages proposed with names and one-line descriptions",
+        "No requirements written on any Sub-Process page",
+        "All domain terms (participant, RMD, spousal waiver, disbursement, e-delivery preference) use UL doc spelling",
+        "Version History stub table is present",
+        "No SLA numbers, value scores, or traceability links invented"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I only have one document: a one-page intent memo from the product owner saying we need to improve the RMD process for participants over 73. Ubiquitous Language document is attached. Please run bpr-intake-shaper.",
+      "expected_output": "Agent asks for confirmation before proceeding with a single source document. The message must acknowledge the single-source limitation, explain the quality risk, and ask the user to either provide a second source or confirm they want to proceed with one.",
+      "assertions": [
+        "Agent does NOT immediately produce a Business Process page draft",
+        "Agent explicitly states only one source document was provided",
+        "Agent asks whether the user wants to proceed or provide a second source",
+        "Message is a question, not a refusal — user can choose to proceed"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Here are two source documents: an SOP and a workshop transcript. Please run bpr-intake-shaper and draft the Business Process page.",
+      "expected_output": "Agent refuses to proceed and asks for the Ubiquitous Language document. The refusal message must name the UL doc as the missing required input and explain why it is needed (consistent terminology, no invented definitions).",
+      "assertions": [
+        "Agent does NOT produce any Business Process page content",
+        "Agent explicitly identifies the Ubiquitous Language document as missing",
+        "Agent explains why the UL doc is a required input (not optional)",
+        "Agent asks for the UL doc before proceeding, not after a partial draft"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "nfr-coverage-agent",
+  "name": "NFR Coverage Agent",
+  "version": "1.0.0",
+  "description": "Surface Non-Functional Requirement gaps for a Business Process page before an NFR workshop or Tollgate review. Produces a coverage matrix across all RKT NFR categories and generates targeted stakeholder questions for each gap. Proposes questions, never NFR text.",
+  "category": "bpr",
+  "tags": ["rkt", "bpr", "nfr", "coverage", "non-functional", "workshop", "tollgate"],
+  "author": "dropkit",
+  "license": "MIT",
+  "deps": {},
+  "input": {
+    "arguments": "Business Process page markdown and its Sub-Process pages",
+    "fileTypes": [".md"]
+  },
+  "output": {
+    "fileTypes": [".md"]
+  },
+  "targets": {
+    "default": { "file": "SKILL.md" }
+  }
+}
