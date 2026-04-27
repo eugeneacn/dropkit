@@ -536,6 +536,8 @@ class OutputWriter:
         self._close = output is not None
         self._buffer: list[dict] = []
         self._csv_writer: csv.DictWriter | None = None
+        self._csv_fields: set[str] = set()
+        self._csv_warned: set[str] = set()
 
     def emit_single(self, record: dict) -> None:
         if self._fmt == "json":
@@ -561,6 +563,7 @@ class OutputWriter:
 
     def _write_csv_row(self, record: dict) -> None:
         if self._csv_writer is None:
+            self._csv_fields = set(record.keys())
             self._csv_writer = csv.DictWriter(
                 self._fh,
                 fieldnames=list(record.keys()),
@@ -568,6 +571,24 @@ class OutputWriter:
                 quoting=csv.QUOTE_MINIMAL,
             )
             self._csv_writer.writeheader()
+        else:
+            # Warn (once per key) when a row has keys that aren't in the
+            # CSV header. DictWriter with extrasaction="ignore" will
+            # silently drop them, which is silent data loss the user
+            # needs to know about. Cleanly switching to a wider header
+            # mid-stream isn't possible in CSV; the user should rerun
+            # with --format jsonl or pass --fields to pin the schema.
+            extras = set(record.keys()) - self._csv_fields - self._csv_warned
+            if extras:
+                self._csv_warned |= extras
+                print(
+                    f"warning: CSV header was fixed from the first row; "
+                    f"these keys appear in later rows and will be omitted: "
+                    f"{', '.join(sorted(extras))}. Use --format jsonl for "
+                    f"a complete export, or pass --fields to pin the "
+                    f"schema explicitly.",
+                    file=sys.stderr,
+                )
         self._csv_writer.writerow(
             {k: _csv_scalar(v) for k, v in record.items()}
         )

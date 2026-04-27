@@ -36,7 +36,6 @@ import httpx
 log = logging.getLogger("jira.client")
 
 DEFAULT_CONCURRENCY = 4
-DEFAULT_MIN_DELAY_MS = 100
 DEFAULT_TIMEOUT_S = 30.0
 MAX_RETRIES = 5
 PAGE_SIZE_DEFAULT = 50
@@ -92,7 +91,6 @@ class JiraClient:
         credentials: Credentials,
         *,
         concurrency: int = DEFAULT_CONCURRENCY,
-        min_delay_ms: int = DEFAULT_MIN_DELAY_MS,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         verify_tls: bool = True,
     ) -> None:
@@ -128,10 +126,10 @@ class JiraClient:
             verify=verify_tls,
             follow_redirects=True,
         )
+        # Concurrency is gated by the semaphore alone. Throttling for
+        # rate-limited endpoints comes from the API's own 429 + Retry-After
+        # response, which the request loop honors.
         self._sem = asyncio.Semaphore(concurrency)
-        self._min_delay = min_delay_ms / 1000.0
-        self._last_request = 0.0
-        self._lock = asyncio.Lock()
 
     async def __aenter__(self) -> "JiraClient":
         return self
@@ -169,13 +167,6 @@ class JiraClient:
             raise ValueError("cannot send json_body and files in the same request")
 
         async with self._sem:
-            async with self._lock:
-                now = asyncio.get_running_loop().time()
-                wait = self._min_delay - (now - self._last_request)
-                if wait > 0:
-                    await asyncio.sleep(wait)
-                self._last_request = asyncio.get_running_loop().time()
-
             last_exc: Exception | None = None
             last_status: int | None = None
             for attempt in range(MAX_RETRIES):
