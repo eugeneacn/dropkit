@@ -1,0 +1,21 @@
+{
+  "id": "traceability-linker",
+  "name": "Traceability Linker",
+  "version": "1.0.0",
+  "description": "Propose domain component and SOP traceability links for requirements missing them before Tollgate handoff. Matches on semantic similarity and Ubiquitous Language vocabulary. Labels each proposal High, Medium, or Low confidence. Never creates links — proposes only; humans commit.",
+  "category": "bpr",
+  "tags": ["rkt", "bpr", "traceability", "domain", "tollgate", "handoff"],
+  "author": "dropkit",
+  "license": "MIT",
+  "deps": {},
+  "input": {
+    "arguments": "Sub-Process page with requirements, domain component or SOP documentation, and Ubiquitous Language document",
+    "fileTypes": [".md"]
+  },
+  "output": {
+    "fileTypes": [".md"]
+  },
+  "targets": {
+    "default": { "file": "SKILL.md" }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "id": "requirement-rewriter",
+  "name": "Requirement Rewriter",
+  "version": "1.0.0",
+  "description": "Validate and rewrite BPR requirement statements against the RKT Writing Guide Do's and Don'ts rubric. Diagnoses violations, proposes rewrites, flags wrong-level and wrong-parent placement. The highest-frequency agent — run dozens of times per epic.",
+  "category": "bpr",
+  "tags": ["rkt", "bpr", "requirements", "linting", "rewriting", "ears", "validation"],
+  "author": "dropkit",
+  "license": "MIT",
+  "deps": {},
+  "input": {
+    "arguments": "requirement statements with parent sub-process name, parent business process name, and path to Ubiquitous Language document",
+    "fileTypes": [".md", ".txt"]
+  },
+  "output": {
+    "fileTypes": [".md"]
+  },
+  "targets": {
+    "default": { "file": "SKILL.md" }
+  }
+}

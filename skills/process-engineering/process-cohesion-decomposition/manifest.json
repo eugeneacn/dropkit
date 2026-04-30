@@ -1,0 +1,21 @@
+{
+  "id": "process-cohesion-decomposition",
+  "name": "Process Cohesion & Decomposition Agent",
+  "version": "1.0.0",
+  "description": "Two-job agent for business process structure. Job 1: decompose a street-view map into a candidate sub-process list with value-stream ownership grid (run once at epic kickoff). Job 2 (opt-in only, requires explicit user approval): check whether an existing business process still holds together as a coherent end-to-end journey after mid-epic changes.",
+  "category": "bpr",
+  "tags": ["rkt", "bpr", "decomposition", "cohesion", "process", "street-view", "value-stream"],
+  "author": "dropkit",
+  "license": "MIT",
+  "deps": {},
+  "input": {
+    "arguments": "for Job 1: street-view map description + Business Process name/description; for Job 2 (with explicit approval): Business Process page + Sub-Process pages + Ubiquitous Language document",
+    "fileTypes": [".md", ".txt"]
+  },
+  "output": {
+    "fileTypes": [".md"]
+  },
+  "targets": {
+    "default": { "file": "SKILL.md" }
+  }
+}

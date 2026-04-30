@@ -1,0 +1,43 @@
+{
+  "skill_name": "traceability-linker",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Sub-Process: RMD Calculation — calculates required minimum distribution amounts for eligible participants. Business Process: Required Minimum Distribution Processing. Ubiquitous Language document provided (defines: participant, RMD, applicable divisor, plan balance). Requirement missing traceability: 'Participant RMD amount must be calculated using the current plan balance and applicable divisor.' Domain component corpus provided, including: Distributions domain > Calculation sub-domain > Calculator for RMD component (description: computes required minimum distribution amounts using IRS-approved divisors and current account balances). Please run traceability-linker.",
+      "expected_output": "High-confidence proposal linking the requirement to 'Distributions > Calculation > Calculator for RMD'. Rationale cites both the UL doc term match ('RMD', 'applicable divisor', 'plan balance' all map to the component) and semantic alignment (the component's stated responsibility directly covers the requirement's action). Confidence label is High. Link type is domain component (system-supported). Output is ordered correctly (High first).",
+      "assertions": [
+        "Requirement receives a High-confidence proposal",
+        "Proposed link is to the Calculator for RMD component (or equivalent named in corpus)",
+        "Rationale cites specific UL doc term matches (RMD, divisor, or plan balance)",
+        "Link type is identified as domain component (system-supported)",
+        "Output is ordered High → Medium → Low → manual mapping",
+        "No link is created — only proposed"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Sub-Process: Participant Engagement. Business Process: Required Minimum Distribution Processing. Ubiquitous Language document provided. Requirement missing traceability: 'Participant must receive RMD educational notification via their registered communication preference before the applicable deadline.' Domain component corpus provided, including: (1) Notifications domain > RMD Notifications component (description: manages RMD-specific participant notifications); (2) Communication Preferences domain > Delivery Preference component (description: manages participant communication channel preferences including e-delivery, mail, and phone). Please run traceability-linker.",
+      "expected_output": "Medium-confidence proposal because the requirement spans two components: RMD Notifications and Delivery Preference. The output flags this as a multi-domain requirement and labels it Medium rather than High due to the ambiguity about which component is primary. Both candidate components are listed. The ambiguity explanation notes that the notification content links to RMD Notifications but the delivery routing links to Delivery Preference.",
+      "assertions": [
+        "Requirement is flagged as spanning multiple domain components",
+        "At least two candidate components are presented",
+        "Confidence is NOT High — it is Medium or Low due to the multi-domain ambiguity",
+        "Rationale explains why the requirement touches both components",
+        "Output recommends human decision on primary vs secondary link",
+        "No link is created — only proposed"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Sub-Process: Spousal Waiver Collection. Business Process: Required Minimum Distribution Processing. Ubiquitous Language document provided. Requirement missing traceability: 'Where a participant elects a joint and survivor annuity, the spouse must provide written consent before the election is processed.' Domain component corpus provided (contains components for: RMD Calculation, Disbursement Processing, Participant Notifications, Communication Preferences). Please run traceability-linker.",
+      "expected_output": "No match found in the provided corpus for the spousal consent / joint-and-survivor annuity requirement. Output flags the requirement as 'manual mapping required' with a placeholder traceability entry. The reason must explain that none of the provided components cover spousal waiver or consent collection, and suggest this may require a domain component documentation update or SOP lookup with the Product Engineer.",
+      "assertions": [
+        "Requirement is listed under 'Manual Mapping Required'",
+        "No High, Medium, or Low confidence proposal is made",
+        "Reason explicitly states no matching component was found",
+        "A placeholder traceability entry is provided (e.g., '[Domain component — to be identified with Product Engineer]')",
+        "Output does not invent a component name to fill the gap"
+      ]
+    }
+  ]
+}
