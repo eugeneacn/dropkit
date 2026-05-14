@@ -1,0 +1,39 @@
+{
+  "id": "jira-defect-flow",
+  "name": "Jira Defect Flow",
+  "version": "1.0.0",
+  "description": "End-to-end orchestration for a Jira defect: pull the ticket, triage, hand off to the `bug-fix` skill for reproduction-first / root-cause / minimum-diff discipline, open a PR with the Jira key in the Closes footer, comment + transition the ticket via the `jira` skill, and optionally run the consumer repo's dev-deploy hook. Pure choreography — composes existing skills rather than re-implementing them.",
+  "category": "workflows",
+  "tags": ["jira", "defect", "bug-fix", "workflow", "orchestration"],
+  "author": "dropkit",
+  "license": "MIT",
+  "deps": {
+    "skills": [
+      "jira (in this repo) — for all Jira reads, comments, and transitions",
+      "bug-fix (in agent-ready-repo) — for the reproduction / RCA / minimum-fix discipline",
+      "adversarial-reviewer, security-reviewer, quality-engineer (in agent-ready-repo) — for the review pass before PR"
+    ],
+    "system": [
+      "git",
+      "gh (GitHub CLI, authenticated)"
+    ]
+  },
+  "input": {
+    "arguments": "a Jira issue key (e.g., PROJ-123), optionally with a target environment or deploy hook override",
+    "env": {
+      "DEPLOY_DEV_CMD": "Optional. Shell command this skill runs to deploy the merged fix to the dev environment. If unset, the skill stops at PR-merged and asks the user how to deploy. Consumer repos may instead provide an executable `.context/deploy_dev.sh`.",
+      "JIRA_DEFECT_FIX_PREFIX": "Optional. Branch prefix override (default: `fix`). Use e.g. `bugfix` or `hotfix` if your repo convention differs."
+    }
+  },
+  "output": {
+    "artifacts": [
+      ".context/defects/<KEY>.md — triage brief and progress log",
+      "git branch fix/<key>-<slug> with one or more commits",
+      "GitHub PR with Closes: <KEY> footer",
+      "Jira comments and a transition on <KEY>"
+    ]
+  },
+  "targets": {
+    "default": { "file": "SKILL.md" }
+  }
+}
