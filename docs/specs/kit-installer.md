@@ -2,7 +2,7 @@
 
 - **Status:** Approved
 - **Owner:** eugeneacn
-- **Plan:** _deferred — spec only for now_
+- **Plan:** [`docs/specs/kit-installer-plan.md`](kit-installer-plan.md)
 - **Constrained by:** none (dropkit has no ADRs yet)
 
 > **Spec contract:** this document defines what "done" means for the dropkit
@@ -72,7 +72,7 @@ python install.py --scope <SCOPE> [--path PATH]
 
 | Flag | Meaning |
 |---|---|
-| `--scope` | One of: `claude-code-user`, `claude-code-project`. Required unless `--list` or `--update`. (Cursor / Kiro / Codex / Copilot scopes are deferred to v2; see "Deferred to v2".) |
+| `--scope` | One of: `claude-code-user`, `claude-code-project`. Required for install and `--uninstall`. Optional for `--list` and `--update` — see scope recovery below. (Cursor / Kiro / Codex / Copilot scopes are deferred to v2; see "Deferred to v2".) |
 | `--path` | Project root for `*-project` scopes. Defaults to `cwd`. |
 | `--skill ID` | Restrict to named skills (repeatable). If omitted, all skills are in scope. |
 | `--list` | Print the catalog with install status. Does not write. |
@@ -88,6 +88,29 @@ from the repo root (where `install.py` lives). There is no separate top-level
 manifest — each skill's existing `manifest.json` is the source of truth for
 its `id`, `version`, `description`, `category`, pip / npm deps, and any
 declared cross-skill dependencies.
+
+**Manifest fields the installer reads:**
+
+| Field | Type | Required | Used for |
+|---|---|---|---|
+| `id` | string | yes | skill identity and scope-root subdir name |
+| `version` | string | no (default `"0.0.0"`) | outdated detection (string compare) |
+| `description` | string | no | `--list` output |
+| `category` | string | no | `--list` output |
+| `deps.skills` | `[{name: string, source: string}]` | no | dep resolution |
+| `deps.pip` | `string[]` | no | post-install surfacing (see below) |
+| `deps.npm` | `string[]` | no | post-install surfacing |
+| `targets.default.file` | string | no | explicit single-file install target |
+
+If `targets.default.file` is absent, all files under the skill dir are
+included recursively (`SKILL.md`, `manifest.json`, `scripts/`, etc.).
+
+**Scope recovery for `--list` and `--update`.** When run without `--scope`,
+both commands derive the scope root from the `scope_root` field recorded in
+`installed.json`. The state-root is located via the same XDG / Windows /
+project resolution order. If `installed.json` is absent, its `scope_root`
+field is missing, or that path does not exist, exit 2 with a message
+instructing the user to pass `--scope` explicitly.
 
 ### Outputs
 
@@ -147,6 +170,19 @@ exact command the user should run themselves (e.g.
 `pip install -r ~/.claude/skills/jira/requirements.txt`). The installer does
 **not** execute these.
 
+`deps.pip` is an array of strings. Each entry is either a bare package name
+(`"requests"`) or a path to a requirements file relative to the skill dir
+(`"requirements.txt"`). Requirements-file entries surface as
+`pip install -r <resolved-install-path>`; bare package names surface as
+`pip install <names joined by space>`. If a skill dir contains a
+`requirements.txt` and `deps.pip` is absent, the installer surfaces it
+automatically. `deps.npm` follows the same shape; file entries surface as
+`npm install --prefix <skill-install-dir>`.
+
+`installed.json` writes are atomic: the installer writes to a sibling
+`installed.json.tmp` then renames it, so no partial state is visible to
+concurrent readers or if the process is interrupted mid-write.
+
 **Exit codes:**
 
 - `0` success (including `--dry-run` and `--list`)
@@ -186,9 +222,34 @@ exact command the user should run themselves (e.g.
   `--force` is passed. Without `--force`, exit 1.
 - **Python < 3.8.** Detect at startup; print a clear message; exit 2.
 - **No TTY for prompts.** Treat any prompt as aborted (exit 1) unless `--yes`.
-- **Stale skill in `installed.json`** (was installed, then deleted from the
-  repo). `--list` shows it as `orphaned`. `--update` ignores it. `--uninstall`
-  still works using the recorded file list.
+- **Orphaned skill in `installed.json` (stale entry).** A skill that was
+  installed but has since been deleted from the repo. `--list` shows it as
+  `orphaned`. `--update` ignores it with an `INFO` line. `--uninstall` still
+  works using the recorded file list.
+- **`--uninstall` with an unknown skill.** `--uninstall --skill <id>` where
+  `<id>` is not in `installed.json` → exit 2 naming the unknown skill.
+
+### Wrappers
+
+Two thin wrapper scripts live at repo root. Their only job is to locate the
+repo dir and delegate to `install.py`. They must forward all arguments and
+propagate the exit code.
+
+```bash
+# install.sh
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "$SCRIPT_DIR/install.py" "$@"
+```
+
+```powershell
+# install.ps1
+$ErrorActionPreference = "Stop"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+& python "$ScriptDir\install.py" @args
+exit $LASTEXITCODE
+```
 
 ## Contract tests
 
@@ -198,9 +259,11 @@ them. Each bullet is one test.
 ### Discovery and listing
 
 - **`test_list_shows_all_skills`** — Given the repo with N skills under
-  `skills/*/*/manifest.json`, when `--list` runs, then exactly N rows are
-  printed and each row has a `name`, `version`, `category`, and `status`
-  column.
+  `skills/*/*/manifest.json`, when `--list` runs, then exactly N non-header
+  rows are printed. A header row is printed first and does not count toward N.
+  Each row contains the columns `name`, `version`, `category`, and `status`
+  in that order (space-aligned). The test strips ANSI escape sequences before
+  asserting on column content.
 - **`test_list_status_not_installed_by_default`** — Given no `installed.json`,
   when `--list` runs, then every row's status is `not installed`.
 - **`test_list_status_installed_after_install`** — Given a successful
@@ -296,6 +359,9 @@ them. Each bullet is one test.
   directories under the scope root are removed.
 - **`test_uninstall_leaves_unrelated_files`** — Files in the scope root
   that the installer did not write are untouched.
+- **`test_uninstall_nonexistent_skill_exits_2`** — Given `--uninstall
+  --skill <id>` where `<id>` is not present in `installed.json`, the
+  installer exits 2 and names the unknown skill in the error message.
 
 ### Dry-run
 
