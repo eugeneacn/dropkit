@@ -27,28 +27,50 @@ If you find yourself writing a Jira REST call, a reproduction recipe, or
 a root-cause checklist inside this skill, stop — the right place is one
 of the three above.
 
+## Cross-skill invocation — name, not path
+
+This skill names sibling skills (`jira`, `bug-fix`) and subagents
+(`adversarial-reviewer`, `security-reviewer`, `quality-engineer`) **by
+their `name:` field, never by path**. Install locations vary by IDE
+(`~/.claude/skills/`, `.cursor/skills/`, project-scope `.claude/skills/`,
+etc.) and skills can be renamed at install time. Path coupling silently
+breaks every alternative layout.
+
+The contract: when this skill says *"via the `jira` skill: `get-issue
+$KEY ...`"*, the agent uses its native skill-dispatch mechanism to invoke
+the skill registered under that name with those arguments. In Claude
+Code that's the Skill tool (`/<skill-name>` or programmatic dispatch);
+in other IDEs it's the equivalent. **If you find yourself writing
+`~/.claude/skills/jira/...` or any other hardcoded path here, stop —
+look up the skill by name instead.**
+
+Install guidance for the named dependencies lives in `manifest.json`
+under `deps.skills` and `deps.agents` — that's a *where to get them*
+hint, not a runtime path.
+
 ## Prerequisites
 
 Before stage 1, confirm:
 
-1. The `jira` skill works in this environment: run `python <path-to-jira-skill>/scripts/jira.py check`.
-   Exit 0 → proceed. Exit 2 → tell the user to run `setup_credentials.sh`
-   themselves; do not try to authenticate for them.
-2. `gh auth status` is green (PR opening uses it).
-3. `git config user.email` looks right for this repo. If the user has a
+1. The `jira` skill is installed and works in this environment. Invoke
+   it: `jira: check`. Exit 0 → proceed. Exit 2 → tell the user to run
+   the jira skill's `setup_credentials.sh` themselves; do not try to
+   authenticate for them.
+2. The `bug-fix` skill is installed (from `agent-ready-repo` or wherever
+   the consumer keeps it). If not, surface the gap and stop — don't
+   substitute a free-form fix.
+3. `gh auth status` is green (PR opening uses it).
+4. `git config user.email` looks right for this repo. If the user has a
    per-repo identity convention, do not override it.
-4. The consumer repo has the `bug-fix` skill available. If not, surface
-   the gap and stop — don't substitute a free-form fix.
 
 ## Lifecycle
 
 ### Stage 1 — Intake
 
-Fetch the ticket with the fields a defect needs:
+Fetch the ticket with the fields a defect needs, via the `jira` skill:
 
-```bash
-python <jira-skill>/scripts/jira.py get-issue $KEY \
-  --expand renderedFields,attachments,changelog,transitions
+```
+get-issue $KEY --expand renderedFields,attachments,changelog,transitions
 ```
 
 Check for the **three intake requirements** of a defect:
@@ -59,12 +81,11 @@ Check for the **three intake requirements** of a defect:
 | Reproduction steps | `description` |
 | Expected vs actual behavior | `description`, attachments |
 
-If any are missing or unclear, **do not start work**. Comment on the
-ticket asking for the missing piece and stop:
+If any are missing or unclear, **do not start work**. Via the `jira`
+skill, comment on the ticket asking for the missing piece and stop:
 
-```bash
-python <jira-skill>/scripts/jira.py comment $KEY \
-  --body "Before picking this up I need: <list>. Once those are in I'll start."
+```
+comment $KEY --body "Before picking this up I need: <list>. Once those are in I'll start."
 ```
 
 Do not invent reproduction steps. Do not guess the environment.
@@ -80,12 +101,14 @@ yet, just suspects), and any open questions.
 Then **ask the user to confirm before transitioning**. The "In Progress"
 move is visible to the whole team and may reassign the ticket.
 
-```bash
+Via the `jira` skill:
+
+```
 # Discover available transitions for this issue's current state:
-python <jira-skill>/scripts/jira.py list-transitions $KEY
+list-transitions $KEY
 
 # Then apply the user-chosen "start work" transition by name:
-python <jira-skill>/scripts/jira.py transition $KEY --to "In Progress"
+transition $KEY --to "In Progress"
 ```
 
 Use `list-transitions` rather than guessing names — workflow state names
@@ -160,20 +183,20 @@ field; fill it honestly.
 ### Stage 7 — Jira loopback (bug-fix step 8, part 2)
 
 `bug-fix` step 8 mandates that the tracker gets the PR URL and the
-next transition. This is the Jira-specific implementation. Discover
-the next transition the same way as stage 2:
+next transition. This is the Jira-specific implementation. Via the
+`jira` skill, discover the next transition the same way as stage 2:
 
-```bash
-python <jira-skill>/scripts/jira.py comment $KEY \
-  --body "PR: <pr-url>. Reproduction test at <test-path>. Awaiting review."
+```
+comment $KEY --body "PR: <pr-url>. Reproduction test at <test-path>. Awaiting review."
 
-python <jira-skill>/scripts/jira.py list-transitions $KEY
-python <jira-skill>/scripts/jira.py transition $KEY --to "In Review"
+list-transitions $KEY
+transition $KEY --to "In Review"
 ```
 
-If the user uses a Jira MCP instead of the dropkit `jira` skill, the
-calls are equivalent (`mcp__jira__comment`, `mcp__jira__transition`) —
-the contract is the same.
+The subcommand names (`comment`, `list-transitions`, `transition`)
+belong to the `jira` skill — see its `SKILL.md` for the full set. If
+the user has a Jira MCP installed under a different skill name instead,
+the verbs are equivalent — name that skill and use the same contract.
 
 ### Stage 8 — Deploy to dev (optional, consumer-repo specific)
 
@@ -208,7 +231,7 @@ and the next transition (commonly "Ready for QA" / "Dev Deployed").
   `"Ready for Review"` all exist in the wild). Always go through
   `list-transitions` and confirm with the user.
 - **Don't invent a deploy command.** Stage 8 is opt-in.
-- **Don't include `--yes` on `jira.py delete-issue` — ever, in any flow.**
+- **Don't invoke the `jira` skill's `delete-issue` (with or without `--yes`) — ever, in any flow.**
   Defects don't get deleted; if a ticket is wrong, the team transitions
   it to "Won't Fix" or "Duplicate".
 - **Don't add `Co-Authored-By` to commits** unless the repo asks for it.

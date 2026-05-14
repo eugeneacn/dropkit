@@ -1,7 +1,25 @@
 # jira-defect-flow — canonical examples
 
-Three end-to-end shapes you'll see most often. Replace `PROJ-123`,
-`jira-skill-path`, etc. with the values from your environment.
+Three end-to-end shapes you'll see most often. Replace `PROJ-123` etc.
+with the values from your environment.
+
+## Notation
+
+These examples reference sibling skills **by name**, never by path. A
+line like `jira: get-issue PROJ-123` means *invoke the skill registered
+under the name `jira` with subcommand `get-issue` and the given args*.
+How that dispatch happens depends on the IDE:
+
+- **Claude Code**: the Skill tool, or `/jira get-issue PROJ-123` (and
+  similarly for `bug-fix`).
+- **Cursor / Kiro / Codex**: the IDE's skill/rule invocation
+  equivalent.
+- **Raw CLI** (no IDE): `cd` to the skill's install dir and run
+  `python scripts/jira.py get-issue PROJ-123`. Where that dir lives
+  depends on where the user installed the skill.
+
+Path locations like `~/.claude/skills/jira/...` are install-time
+details, not contract.
 
 ---
 
@@ -9,27 +27,26 @@ Three end-to-end shapes you'll see most often. Replace `PROJ-123`,
 
 User: *"Take PROJ-123 from triage to PR on dev."*
 
-```bash
+```
 # Stage 1 — intake
-python ~/.claude/skills/jira/scripts/jira.py check
-python ~/.claude/skills/jira/scripts/jira.py get-issue PROJ-123 \
-  --expand renderedFields,attachments,changelog,transitions \
-  > .context/defects/PROJ-123.raw.json
+jira: check
+jira: get-issue PROJ-123 --expand renderedFields,attachments,changelog,transitions
 
 # (agent reads env / repro / expected-vs-actual — all present)
 
 # Stage 2 — triage + start
 # (agent writes .context/defects/PROJ-123.md with severity, class, suspects)
 # (user confirms start)
-python ~/.claude/skills/jira/scripts/jira.py list-transitions PROJ-123
-python ~/.claude/skills/jira/scripts/jira.py transition PROJ-123 --to "In Progress"
+jira: list-transitions PROJ-123
+jira: transition PROJ-123 --to "In Progress"
 
 # Stage 3 — hand to bug-fix skill
-# (bug-fix writes failing test, identifies root cause, applies minimum fix)
+bug-fix: take PROJ-123 with the triage brief at .context/defects/PROJ-123.md
+# bug-fix writes failing test, identifies root cause, applies minimum fix
 
-# Stage 4 — branch
-BRANCH=$(python skills/workflows/jira-defect-flow/scripts/branch_name.py \
-  PROJ-123 "Null pointer in cart checkout when coupon expired")
+# Stage 4 — branch (local script, lives in this skill — relative path is fine)
+BRANCH=$(python scripts/branch_name.py PROJ-123 \
+  "Null pointer in cart checkout when coupon expired")
 git checkout -b "$BRANCH"
 # -> fix/proj-123-null-pointer-in-cart-checkout-when
 
@@ -42,17 +59,18 @@ gh pr create --base main \
   --body-file .context/defects/PROJ-123-pr-body.md
 # PR body's Why? section contains: Closes: PROJ-123
 
-# Stage 7 — Jira loopback
-python ~/.claude/skills/jira/scripts/jira.py comment PROJ-123 \
-  --body "PR: https://github.com/acme/web/pull/4321. Repro test: tests/checkout/coupon_expiry_test.py::test_expired_coupon_does_not_crash"
-python ~/.claude/skills/jira/scripts/jira.py transition PROJ-123 --to "In Review"
+# Stage 7 — Jira loopback (bug-fix step 8 mechanism)
+jira: comment PROJ-123 --body "PR: https://github.com/acme/web/pull/4321. Repro test: tests/checkout/coupon_expiry_test.py::test_expired_coupon_does_not_crash"
+jira: transition PROJ-123 --to "In Review"
 
 # Stage 8 — dev deploy (only because DEPLOY_DEV_CMD is set)
 "$DEPLOY_DEV_CMD"
-python ~/.claude/skills/jira/scripts/jira.py comment PROJ-123 \
-  --body "Deployed to dev: https://dev.acme.example/checkout. Ready for QA."
-python ~/.claude/skills/jira/scripts/jira.py transition PROJ-123 --to "Ready for QA"
+jira: comment PROJ-123 --body "Deployed to dev: https://dev.acme.example/checkout. Ready for QA."
+jira: transition PROJ-123 --to "Ready for QA"
 ```
+
+Note: `scripts/branch_name.py` lives **inside this skill**, so a
+relative path is correct there — it's not a cross-skill reference.
 
 ---
 
@@ -60,9 +78,8 @@ python ~/.claude/skills/jira/scripts/jira.py transition PROJ-123 --to "Ready for
 
 User: *"Fix PROJ-456."*
 
-```bash
-python ~/.claude/skills/jira/scripts/jira.py get-issue PROJ-456 \
-  --expand renderedFields,attachments,changelog
+```
+jira: get-issue PROJ-456 --expand renderedFields,attachments,changelog
 ```
 
 Agent reads the ticket — description is one line: *"Search is broken,
@@ -70,9 +87,8 @@ please fix."* No environment, no repro, no expected-vs-actual.
 
 **Do not proceed.** Comment and stop:
 
-```bash
-python ~/.claude/skills/jira/scripts/jira.py comment PROJ-456 \
-  --body "Before picking this up I need: (1) environment — which deployment / build, on which browser; (2) reproduction steps — what query did you run; (3) expected vs actual behavior — what should have happened vs what did. Once those are in I'll start."
+```
+jira: comment PROJ-456 --body "Before picking this up I need: (1) environment — which deployment / build, on which browser; (2) reproduction steps — what query did you run; (3) expected vs actual behavior — what should have happened vs what did. Once those are in I'll start."
 ```
 
 No branch created, no transition applied. Surface to the user that the
