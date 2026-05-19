@@ -508,16 +508,89 @@ def test_issuetype_config_is_hashable_by_sha():
 # upstream wrapper ships). Placeholders so they auto-enable when T3 lands.
 # ---------------------------------------------------------------------------
 @pytest.mark.skipif(not _has_t3(), reason="requires T3 upstream wrapper")
-def test_unknown_team_field_id_exits_2():
+def test_unknown_team_field_id_exits_2(tmp_path):
     """team_field.id = customfield_99999 not present in Jira's field
     catalog (mocked 'jira: raw GET field' returns a list without it) →
-    exit 2 naming the id. Wires up once T3 lands."""
-    pytest.fail("T3 has shipped; implement the upstream-wrapper test")
+    exit 2 naming the id."""
+    from flow_metrics.config import validate_team_field_against_catalog
+
+    base = _baseline_state_dict()
+    base["team_field"] = {"id": "customfield_99999", "kind": "single_value"}
+    path = tmp_path / "states.json"
+    _write_json(path, base)
+    sc = load_state_config(path)
+
+    class _FakeJira:
+        calls: list = []
+
+        def raw_get(self, p, params=None):
+            self.calls.append((p, params))
+            assert p == "field", "rule 9 must query the field catalog"
+            return [
+                {"id": "customfield_10000", "name": "Story Points"},
+                {"id": "customfield_10001", "name": "Sprint"},
+                {"id": "summary", "name": "Summary"},
+            ]
+
+    fake = _FakeJira()
+    with pytest.raises(ConfigError) as ei:
+        validate_team_field_against_catalog(sc, override=None, jira=fake)
+    assert "customfield_99999" in str(ei.value)
+    # Exit-code mapping is 2 — confirmed via the per-class default.
+    assert ei.value.exit_code == 2
 
 
 @pytest.mark.skipif(not _has_t3(), reason="requires T3 upstream wrapper")
-def test_team_field_override_validated_not_config():
+def test_team_field_override_validated_not_config(tmp_path):
     """--team-field-override customfield_88888 is what's validated against
-    the catalog; the config's team_field.id is not consulted that run.
-    Wires up once T3 lands."""
-    pytest.fail("T3 has shipped; implement the upstream-wrapper test")
+    the catalog; the config's team_field.id is not consulted that run."""
+    from flow_metrics.config import validate_team_field_against_catalog
+
+    base = _baseline_state_dict()
+    # Config-side id is something that WOULD pass the catalog check,
+    # but the override is what's validated.
+    base["team_field"] = {"id": "customfield_77777", "kind": "single_value"}
+    path = tmp_path / "states.json"
+    _write_json(path, base)
+    sc = load_state_config(path)
+
+    class _FakeJira:
+        def raw_get(self, p, params=None):
+            assert p == "field"
+            # customfield_77777 is present (config-side); customfield_88888 (override) is not.
+            return [
+                {"id": "customfield_77777", "name": "Config Team"},
+                {"id": "customfield_10001", "name": "Sprint"},
+            ]
+
+    fake = _FakeJira()
+    with pytest.raises(ConfigError) as ei:
+        validate_team_field_against_catalog(
+            sc, override="customfield_88888", jira=fake
+        )
+    msg = str(ei.value)
+    assert "customfield_88888" in msg, msg
+    # The config-side id (which IS in the catalog) must not appear in
+    # the failure message — the override is what's validated.
+    assert "customfield_77777" not in msg
+
+
+@pytest.mark.skipif(not _has_t3(), reason="requires T3 upstream wrapper")
+def test_team_field_validation_noop_when_unset(tmp_path):
+    """No team_field.id and no override → no catalog query, no error.
+
+    The field is optional; team-rollup gating happens in T9.
+    """
+    from flow_metrics.config import validate_team_field_against_catalog
+
+    base = _baseline_state_dict()
+    base.pop("team_field", None)
+    path = tmp_path / "states.json"
+    _write_json(path, base)
+    sc = load_state_config(path)
+
+    class _NoopJira:
+        def raw_get(self, p, params=None):
+            raise AssertionError("rule 9 should not query the catalog when team_field is unset")
+
+    validate_team_field_against_catalog(sc, override=None, jira=_NoopJira())

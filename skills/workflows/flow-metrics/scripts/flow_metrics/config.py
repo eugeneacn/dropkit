@@ -445,3 +445,38 @@ def load_issuetype_config(path: Optional[Path] = None) -> IssuetypeConfig:
     parsed = _read_json(resolved, "issuetype config")
     validate_issuetype_config(parsed)
     return _build_issuetype_config(parsed)
+
+
+# ---------------------------------------------------------------------------
+# Rule 9: team_field.id validation against Jira's field catalog
+# ---------------------------------------------------------------------------
+def validate_team_field_against_catalog(
+    state_config: StateConfig,
+    override: Optional[str],
+    jira: Any,
+) -> None:
+    """Spec rule 9: the configured ``team_field.id`` must exist in Jira's
+    field catalog. Deferred from :func:`validate_state_config` because it
+    requires the T3 upstream wrapper.
+
+    Resolution order: ``--team-field-override`` (if set) wins; else
+    ``state_config.team_field.id``. If neither is set, this is a no-op
+    (the field is optional unless team rollup is requested; that gate
+    lives in T9).
+
+    Raises :class:`ConfigError` (exit 2) naming the offending id when
+    the field is absent from ``jira: raw GET field``.
+    """
+    target_id = override if override is not None else state_config.team_field.id
+    if target_id is None:
+        return
+    catalog = jira.raw_get("field")
+    known: set = set()
+    if isinstance(catalog, list):
+        for item in catalog:
+            if isinstance(item, dict) and isinstance(item.get("id"), str):
+                known.add(item["id"])
+    if target_id not in known:
+        raise ConfigError(
+            "team_field.id {!r} not found in Jira's field catalog".format(target_id)
+        )

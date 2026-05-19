@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from . import clock
+from .upstream import AllowlistError, JiraError, UpstreamNotFoundError
 
 
 class ValidationError(Exception):
@@ -378,6 +379,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except ValidationError as e:
         print("error: {}".format(e), file=sys.stderr)
         return EXIT_VALIDATION
+    except (AllowlistError, UpstreamNotFoundError) as e:
+        # T3: wrapper-boundary refusals (disallowed verbs, missing
+        # upstream skill) are validation-class failures. The actual
+        # upstream call sites land in T4+; the mapping is declared now
+        # so the contract is locked in at the boundary every future
+        # task crosses.
+        print("error: {}".format(e), file=sys.stderr)
+        return EXIT_VALIDATION
+    except JiraError as e:
+        # Upstream stderr was already forwarded inside the wrapper; here
+        # we only need to translate to the right exit code.
+        return EXIT_UPSTREAM
 
     # Overwrite confirmation gate. Real write path is in T10; T1 just
     # owns the TTY-abort guarantee so the contract test can lock it in.
