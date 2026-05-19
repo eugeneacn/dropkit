@@ -43,7 +43,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Sequence
 
-import clock
+from . import clock
 
 
 class ValidationError(Exception):
