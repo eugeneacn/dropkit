@@ -24,10 +24,10 @@ If you're new, start at the
 read the guides in. The short version: the `jira` skill is the
 foundation for everything else, so set it up first.
 
-The how-to set currently covers two stacks:
+The how-to set currently covers these stacks:
 
 - **Skill setup** — [`jira`](how-to/set-up-jira-skill.md) (required
-  for everything below) and
+  for the metrics and defect-flow stacks) and
   [`jira-align`](how-to/set-up-jira-align-skill.md) (only for
   program / portfolio metrics scopes).
 - **Metrics stack** —
@@ -37,6 +37,11 @@ The how-to set currently covers two stacks:
   [Jira preflight](how-to/prepare-jira-for-flow-metrics.md).
 - **Defect lifecycle workflow** —
   [`jira-defect-flow`](how-to/run-jira-defect-flow.md).
+- **Confluence export** —
+  [`confluence-crawler`](how-to/set-up-confluence-crawler-skill.md)
+  setup plus the
+  [crawl how-to](how-to/crawl-a-confluence-space.md). Independent
+  of everything above.
 
 For the formal contracts that govern each skill, see
 [`docs/specs/`](../specs/). Specs are normative; these guides are

@@ -72,6 +72,18 @@ In words:
   defect from ticket to PR end-to-end via the `jira` + `bug-fix`
   skills. Independent of the metrics stack.
 
+### Confluence export
+
+Independent of the Jira stack. The `confluence-crawler` skill is
+self-contained — it does not consume or produce anything that the
+other guides use.
+
+- [Set up the confluence-crawler skill](set-up-confluence-crawler-skill.md)
+  — credentials, token, verification. One-time per environment.
+- [Crawl a Confluence space](crawl-a-confluence-space.md) — invoke
+  the crawler for the common shapes (whole space, subtree,
+  refresh, on-prem), and interpret what it writes.
+
 ## Suggested reading order
 
 If you're new to dropkit and want to measure flow:
@@ -90,6 +102,11 @@ If you're new to dropkit and want to ship defect fixes:
 2. Install `bug-fix` from
    [agent-ready-repo](https://github.com/eugenelim/agent-ready-repo)
 3. [Run jira-defect-flow](run-jira-defect-flow.md)
+
+If you only want to mirror Confluence to Markdown:
+
+1. [Set up the confluence-crawler skill](set-up-confluence-crawler-skill.md)
+2. [Crawl a Confluence space](crawl-a-confluence-space.md)
 
 For the formal contracts that govern each skill, see
 [`docs/specs/`](../../specs/). Specs are normative; these guides are
