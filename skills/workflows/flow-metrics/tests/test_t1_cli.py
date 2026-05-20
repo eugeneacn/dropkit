@@ -132,8 +132,17 @@ def test_team_only_valid_with_project():
 
 
 def test_team_with_project_is_ok():
+    """--project PROJ --team Foo passes flag-combo validation. Post-T13 the
+    pipeline is wired, so without a discoverable upstream skill the call
+    surfaces UpstreamNotFoundError → exit 2. The point of this contract
+    test is that --team paired with --project doesn't itself reject; the
+    failure (when it comes) is from upstream-discovery, not flag-combo
+    validation. That distinction is what we assert here.
+    """
     rc, out, err = _run(["--project", "PROJ", "--team", "Foo"])
-    assert rc == 0  # T1 stub
+    assert rc == 2
+    assert "--team" not in err  # not a flag-combo failure
+    assert "upstream skill" in err or "not found" in err
 
 
 def test_per_issue_requires_output_flag():
@@ -265,15 +274,22 @@ def test_overwrite_aborts_without_tty(tmp_path, monkeypatch):
 
 
 def test_overwrite_yes_flag_through_cli(tmp_path, monkeypatch):
-    """`--yes` bypasses the abort even with an existing file and no TTY."""
+    """`--yes` bypasses the abort even with an existing file and no TTY.
+
+    Post-T13 the pipeline runs after the overwrite gate, so without a
+    discoverable upstream skill the call lands on UpstreamNotFoundError
+    (exit 2) — but crucially **not** EXIT_USER_ABORT (1). That difference
+    is what proves --yes bypassed the abort path.
+    """
     existing = tmp_path / "out.json"
     existing.write_text("prior")
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False, raising=False)
     rc, out, err = _run(["--project", "PROJ", "--output", str(existing), "--yes"])
-    # T1 stub still doesn't write, but the abort must NOT fire.
-    assert rc == 0
-    assert "not yet implemented" in out
+    assert rc != 1, "--yes must bypass the EXIT_USER_ABORT path"
+    # Validate the failure is downstream of the abort gate (upstream
+    # discovery), not the abort itself.
+    assert "overwrite was not confirmed" not in err
 
 
 def test_overwrite_yes_bypasses_prompt(tmp_path):
@@ -417,17 +433,31 @@ def test_unknown_metric_rejected():
     assert "bogus" in err
 
 
-def test_stub_command_path_returns_zero():
+def test_pipeline_attempts_upstream_when_validation_passes():
+    """Once flag-combo validation passes, main() drives the pipeline.
+
+    Pre-T13 this path returned a stub. Post-T13 it tries to discover the
+    upstream ``jira`` skill, fails (no skill installed in the test env),
+    and exits 2 with a clear "not found" message. The integration suite
+    (test_integration.py) covers the happy path with a fixture-replay
+    upstream — this construction test only asserts that the pipeline is
+    actually being invoked.
+    """
     rc, out, err = _run(["--project", "PROJ"])
-    assert rc == 0
-    assert "not yet implemented" in out
+    assert rc == 2
+    assert "upstream skill" in err or "not found" in err
 
 
-def test_stub_command_path_project_scope_in_output():
+def test_window_resolution_runs_before_pipeline():
+    """A `--from` / `--to` window is parsed before the pipeline runs.
+
+    Verified by passing an invalid window and asserting exit 2 with a
+    window-shaped error message — proving window resolution is on the
+    pre-pipeline path. (Pre-T13 the same test asserted the stub printed
+    the resolved window; post-T13 the pipeline output replaces the stub.)
+    """
     rc, out, err = _run(
-        ["--project", "PROJ", "--from", "2026-01-01", "--to", "2026-01-31"]
+        ["--project", "PROJ", "--from", "2026-01-31", "--to", "2026-01-01"]
     )
-    assert rc == 0
-    assert "project=PROJ" in out
-    assert "2026-01-01" in out
-    assert "2026-01-31" in out
+    assert rc == 2
+    assert "--from" in err and "--to" in err

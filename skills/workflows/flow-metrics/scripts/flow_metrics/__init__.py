@@ -345,6 +345,328 @@ def confirm_overwrite(
 
 
 # ---------------------------------------------------------------------------
+# Pipeline wiring (T13 — orchestrates T2-T11 module APIs end-to-end)
+# ---------------------------------------------------------------------------
+def _format_team_id_literal(team_id: str) -> str:
+    """Render a Jira Align team id as a JQL literal for the IN clause.
+
+    Numeric ids pass through unquoted; everything else is double-quoted with
+    embedded quotes escaped. Mirrors per_team._format_team_id_for_jql so the
+    bare-scope clause we hand to iter_per_issue_rows formats identically to
+    the compose_program_scope_jql path used by per_team rollup.
+    """
+    s = str(team_id)
+    if s == "":
+        raise ValidationError("jira-align returned an empty team id")
+    if s.lstrip("-").isdigit():
+        return s
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _build_scope_clause(args: argparse.Namespace, state_config, teams) -> Optional[str]:
+    """Compose the bare scope JQL (no user clause, no ORDER BY).
+
+    Project scope returns ``project = <KEY>`` optionally narrowed by
+    ``--team`` against the configured team_field. Program/portfolio scope
+    returns ``"<field>" in (id1, id2, ...)`` against the resolved team list,
+    or None when the team list is empty (the caller emits an empty report).
+    """
+    if args.project is not None:
+        clause = "project = " + args.project
+        if args.team:
+            tf = state_config.team_field
+            if tf is not None and tf.id:
+                clause += ' AND "{}" = "{}"'.format(tf.id, args.team)
+        return clause
+    # program / portfolio
+    if not teams:
+        return None
+    from .align import require_align_join_field
+    align_join_field = require_align_join_field(state_config, args.align_join_field)
+    rendered = ", ".join(_format_team_id_literal(t.id) for t in teams)
+    return '"{}" in ({})'.format(align_join_field, rendered)
+
+
+def _scope_kind_and_value(args: argparse.Namespace):
+    if args.project is not None:
+        return "project", args.project
+    if args.program_id is not None:
+        return "program", args.program_id
+    return "portfolio", args.portfolio_id
+
+
+def _scope_meta_dict(args: argparse.Namespace) -> dict:
+    if args.project is not None:
+        out = {"project": args.project}
+        if args.team:
+            out["team"] = args.team
+        return out
+    if args.program_id is not None:
+        return {"program_id": args.program_id}
+    return {"portfolio_id": args.portfolio_id}
+
+
+def _resolve_metrics(args: argparse.Namespace):
+    if args.metrics is None:
+        return list(ALL_METRICS)
+    return [m.strip() for m in args.metrics.split(",") if m.strip()]
+
+
+def _run_pipeline(args: argparse.Namespace, window: "Window") -> int:
+    """Drive the full pipeline end-to-end. Returns a process exit code.
+
+    Orchestration only — every computation step lives in a T2-T11 module.
+    Exceptions raised by modules (ValidationError, AllowlistError,
+    UpstreamNotFoundError, JiraError, CallerResolutionError, ConfigError,
+    AlignResponseError, ValueError from align_join_field / align_teams_path)
+    bubble out to main()'s try/except, which maps to the right exit code.
+    """
+    # Local imports — keep top-level import surface minimal so the T1
+    # stub-only paths (--help, validation errors) don't pay the full
+    # module-graph cost.
+    from dataclasses import replace as _replace
+    from .config import ConfigError, TeamField, load_issuetype_config, load_state_config
+    from .upstream import JiraAlignClient, JiraClient, discover_skill_path
+    from .align import (
+        AlignScope,
+        compute_sources,
+        teams_for_scope,
+        validate_align_teams_path,
+    )
+    from .per_issue import iter_per_issue_rows
+    from .per_team import (
+        bucket_by_team,
+        per_team_double_counted,
+        per_team_rollup,
+    )
+    from .aggregate import aggregate
+    from .cohort import build_cohort_breakdown, resolve_cohort_keys
+    from .notes import NotesCollector
+    from .meta import build_meta, resolve_caller
+    from .output import Report, render_csv, render_json, render_jsonl
+    from .cache import cache_key, read_cache, write_cache_tee, cleanup_stale_tmps
+
+    # --align-teams-path: validate up-front so a bad value lands as exit 2
+    # before any subprocess fires.
+    if args.align_teams_path is not None:
+        validate_align_teams_path(args.align_teams_path)
+
+    # 1. Configs ----------------------------------------------------------
+    try:
+        state_config = load_state_config(
+            Path(args.state_config) if args.state_config else None
+        )
+        issuetype_config = load_issuetype_config(
+            Path(args.issuetype_config) if args.issuetype_config else None
+        )
+    except ConfigError as e:
+        print("error: {}".format(e), file=sys.stderr)
+        return EXIT_VALIDATION
+
+    # --team-field-override replaces only the id; kind is preserved (or
+    # defaults to single_value when the source config did not set one).
+    if args.team_field_override is not None:
+        original_tf = state_config.team_field
+        kind = (original_tf.kind if original_tf and original_tf.kind else "single_value")
+        state_config = _replace(
+            state_config,
+            team_field=TeamField(id=args.team_field_override, kind=kind),
+        )
+
+    scope_kind, scope_value = _scope_kind_and_value(args)
+    scope_meta = _scope_meta_dict(args)
+
+    # 2. Upstream discovery ----------------------------------------------
+    jira_script = discover_skill_path("jira")
+    jira = JiraClient(jira_script)
+    align: Optional[JiraAlignClient] = None
+    if scope_kind in ("program", "portfolio"):
+        align_script = discover_skill_path("jira-align")
+        align = JiraAlignClient(align_script)
+
+    # 3. Resolve align teams (None for project scope) ---------------------
+    if scope_kind in ("program", "portfolio"):
+        align_scope = AlignScope(
+            kind=scope_kind,
+            value=scope_value,
+            teams_path_override=args.align_teams_path,
+        )
+        teams = teams_for_scope(align, align_scope)
+    else:
+        teams = []
+
+    scope_clause = _build_scope_clause(args, state_config, teams)
+
+    # 4. Cache key + read --------------------------------------------------
+    cache_dir = Path.cwd() / ".context" / "flow-metrics" / "cache"
+    cleanup_stale_tmps(cache_dir)
+    window_dict = {
+        "from": window.from_date.isoformat(),
+        "to": window.to_date.isoformat(),
+    }
+    cache_scope = {"kind": scope_kind, "value": scope_value}
+    if scope_kind == "project" and args.team:
+        cache_scope["team"] = args.team
+    key = cache_key(
+        cache_scope,
+        window_dict,
+        args.jql,
+        args.align_filter,
+        state_config.sha,
+        issuetype_config.sha,
+        args.team_field_override,
+        args.align_join_field,
+        args.align_teams_path,
+    )
+
+    # 5. Fetch + derive (or read from cache) ------------------------------
+    rows: list
+    if scope_clause is None:
+        # No teams resolved in program / portfolio scope — emit an empty
+        # report rather than building a malformed empty IN () clause.
+        rows = []
+    else:
+        cached = None if args.no_cache else read_cache(cache_dir, key)
+        if cached is not None:
+            rows = list(cached)
+        else:
+            user_clause = args.jql
+            stream = iter_per_issue_rows(
+                jira,
+                scope_clause,
+                user_clause,
+                state_config,
+                issuetype_config,
+                window,
+            )
+            if args.no_cache:
+                rows = list(stream)
+            else:
+                rows = list(write_cache_tee(cache_dir, key, stream))
+
+    notes = NotesCollector()
+
+    # 6. Cohort split ------------------------------------------------------
+    cohort_breakdown_dict = None
+    if args.cohort_jql and scope_clause is not None and not args.per_issue:
+        cohort_keys = resolve_cohort_keys(jira, args.cohort_jql, scope_clause)
+        cohort_breakdown_dict = build_cohort_breakdown(
+            rows,
+            cohort_keys,
+            state_config,
+            window,
+            notes,
+            include_subtasks=args.include_subtasks,
+        )
+    elif args.cohort_jql and scope_clause is not None and args.per_issue:
+        # Per-issue with cohort: tag each row but don't compute breakdown.
+        from .cohort import tag_cohort as _tag_cohort
+        cohort_keys = resolve_cohort_keys(jira, args.cohort_jql, scope_clause)
+        rows = list(_tag_cohort(rows, cohort_keys))
+
+    # 7. Top-level aggregate ----------------------------------------------
+    agg_block = aggregate(
+        iter(rows),
+        window,
+        state_config,
+        include_subtasks=args.include_subtasks,
+    )
+
+    # 8. Per-team rollup --------------------------------------------------
+    per_team_rows: list = []
+    team_field = state_config.team_field
+    distinct_teams = {r.team for r in rows}
+    should_per_team = scope_kind in ("program", "portfolio") or (
+        scope_kind == "project" and len(distinct_teams) > 1
+    )
+    if should_per_team and rows:
+        # Array-kind team fields require a teams_for_row callable to
+        # enumerate full team lists; T5's per-issue derivation only
+        # carries the first team on the row. v1 main() supplies a
+        # single-value-equivalent callable for array kind so the
+        # pipeline runs to completion and meta.per_team_double_counted
+        # flips True per spec; full array semantics (the same issue
+        # counted in every team's row) needs the raw issue dict on
+        # the row, which is a larger refactor of T5's derive path.
+        # Tracked separately from T13.
+        def _single_value_teams_cb(r):
+            return (r.team,)
+
+        if team_field is not None and team_field.kind == "array":
+            teams_cb = _single_value_teams_cb
+        else:
+            teams_cb = None
+        buckets = bucket_by_team(
+            iter(rows), team_field, teams_for_row=teams_cb, notes=notes
+        )
+        per_team_rows = per_team_rollup(
+            buckets,
+            state_config,
+            window,
+            include_subtasks=args.include_subtasks,
+        )
+    pt_double = per_team_double_counted(team_field)
+
+    # 9. Notes from aggregate counters ------------------------------------
+    if agg_block.cancelled_in_window > 0:
+        notes.add_cancelled(agg_block.cancelled_in_window)
+    if agg_block.delivered_without_commitment > 0:
+        notes.add_skipped_commitment(agg_block.delivered_without_commitment)
+    if agg_block.flow_efficiency_zero_denominator > 0:
+        notes.add_zero_denominator_flow_eff(agg_block.flow_efficiency_zero_denominator)
+    notes.add_flow_load_sample_count(agg_block.flow_load_sample_count, "included")
+    notes.add_defect_ratio_disclaimer()
+
+    # 10. Meta ------------------------------------------------------------
+    whoami_payload = jira.whoami()
+    caller = resolve_caller(whoami_payload)
+    sources = compute_sources(scope_kind)
+    metrics_requested = _resolve_metrics(args)
+    meta_dict = build_meta(
+        caller=caller,
+        scope=scope_meta,
+        window=window,
+        sources=sources,
+        metrics_requested=metrics_requested,
+        state_config_sha=state_config.sha,
+        issuetype_config_sha=issuetype_config.sha,
+        generated_at=clock.today_utc(),
+        per_team_double_counted=pt_double,
+        cohort_jql=args.cohort_jql,
+    )
+
+    # 11. Render + write --------------------------------------------------
+    if args.per_issue:
+        out_path = Path(args.output)
+        with open(out_path, "wb") as f:
+            for line in render_jsonl(iter(rows)):
+                f.write(line)
+        return EXIT_OK
+
+    report = Report(
+        aggregate=agg_block,
+        meta=meta_dict,
+        notes=notes.finalize(),
+        metrics_requested=metrics_requested,
+        cohort_breakdown=cohort_breakdown_dict,
+        per_team=per_team_rows,
+    )
+    if args.format == "json":
+        payload = render_json(report)
+    else:
+        payload = render_csv(report)
+
+    if args.output:
+        with open(args.output, "wb") as f:
+            f.write(payload)
+    else:
+        sys.stdout.buffer.write(payload)
+        sys.stdout.buffer.write(b"\n")
+        sys.stdout.flush()
+    return EXIT_OK
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -358,20 +680,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("error: {}".format(e), file=sys.stderr)
         return EXIT_VALIDATION
     except (AllowlistError, UpstreamNotFoundError) as e:
-        # T3: wrapper-boundary refusals (disallowed verbs, missing
-        # upstream skill) are validation-class failures. The actual
-        # upstream call sites land in T4+; the mapping is declared now
-        # so the contract is locked in at the boundary every future
-        # task crosses.
+        # T3 test seam — these exceptions are raised by the upstream
+        # wrapper layer, never by validate_args itself in production, but
+        # T3's test_main_catches_* contract tests monkeypatch validate_args
+        # to inject them and assert main()'s exit-code mapping.
         print("error: {}".format(e), file=sys.stderr)
         return EXIT_VALIDATION
     except JiraError:
-        # Upstream stderr was already forwarded inside the wrapper; here
-        # we only need to translate to the right exit code.
         return EXIT_UPSTREAM
 
-    # Overwrite confirmation gate. Real write path is in T10; T1 just
-    # owns the TTY-abort guarantee so the contract test can lock it in.
+    # Overwrite confirmation gate (T1 contract — applies before the
+    # pipeline so a missing TTY aborts before any subprocess fires).
     if args.output is not None:
         out_path = Path(args.output)
         if not confirm_overwrite(out_path, yes=args.yes):
@@ -381,27 +700,35 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
             return EXIT_USER_ABORT
 
-    # Stub. Real command paths land in T2+.
-    print(
-        "not yet implemented (T1 scaffold). window=[{}, {}], scope={}".format(
-            window.from_date.isoformat(),
-            window.to_date.isoformat(),
-            _scope_summary(args),
-        )
-    )
-    return EXIT_OK
-
-
-def _scope_summary(args: argparse.Namespace) -> str:
-    if args.project is not None:
-        if args.team is not None:
-            return "project={} team={}".format(args.project, args.team)
-        return "project={}".format(args.project)
-    if args.program_id is not None:
-        return "program-id={}".format(args.program_id)
-    if args.portfolio_id is not None:
-        return "portfolio-id={}".format(args.portfolio_id)
-    return "(unknown)"
+    try:
+        return _run_pipeline(args, window)
+    except ValidationError as e:
+        print("error: {}".format(e), file=sys.stderr)
+        return EXIT_VALIDATION
+    except (AllowlistError, UpstreamNotFoundError) as e:
+        # Wrapper-boundary refusals (disallowed verbs, missing upstream
+        # skill) are validation-class failures.
+        print("error: {}".format(e), file=sys.stderr)
+        return EXIT_VALIDATION
+    except ValueError as e:
+        # require_align_join_field / validate_align_teams_path /
+        # compose_program_scope_jql raise ValueError on bad inputs the
+        # spec maps to exit 2.
+        print("error: {}".format(e), file=sys.stderr)
+        return EXIT_VALIDATION
+    except JiraError:
+        # Upstream stderr was already forwarded inside the wrapper; here
+        # we only need to translate to the right exit code.
+        return EXIT_UPSTREAM
+    except Exception as e:
+        # Catch-all for upstream-side data shape errors (AlignResponseError,
+        # CallerResolutionError, etc.) — the spec maps these to exit 3.
+        from .align import AlignResponseError
+        from .meta import CallerResolutionError
+        if isinstance(e, (AlignResponseError, CallerResolutionError)):
+            print("error: {}".format(e), file=sys.stderr)
+            return EXIT_UPSTREAM
+        raise
 
 
 if __name__ == "__main__":
