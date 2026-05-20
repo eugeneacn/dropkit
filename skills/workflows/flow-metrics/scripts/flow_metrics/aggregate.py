@@ -145,21 +145,25 @@ def aggregate(
 
     for row in rows:
         if row.delivered_in_window:
-            bucket = row.issuetype_bucket or OTHER_BUCKET
-            if bucket not in buckets:
-                # User-configured issuetype buckets outside the spec's
-                # six fall back to "other" for distribution accounting;
-                # this matches the spec's "Unmapped issuetypes go into
-                # `other`" sink rule for the aggregate's purposes.
-                bucket = OTHER_BUCKET
+            raw_bucket = row.issuetype_bucket or OTHER_BUCKET
+            # Custom user-configured buckets (anything outside the spec's
+            # standard six) funnel to "other" for the AggregateBlock's
+            # fixed-shape distribution. They are NOT counted as unmapped
+            # — only T5's None-mapped-to-"other" sink (raw issuetype not
+            # in any user bucket) signals "unmapped" for the notes line.
+            bucket = raw_bucket if raw_bucket in buckets else OTHER_BUCKET
             buckets[bucket] += 1
-            if bucket == OTHER_BUCKET:
+            if raw_bucket == OTHER_BUCKET:
                 unmapped_issuetype += 1
+
+            # Rework numerator: sum across ALL delivered-in-window rows
+            # (spec: numerator-population is delivered-in-window even
+            # when subtasks are excluded from the throughput denominator).
+            rework_numerator += row.rework_count
 
             is_subtask = bucket == SUBTASK_BUCKET
             if include_subtasks or not is_subtask:
                 throughput += 1
-                rework_numerator += row.rework_count
                 if row.lead_time_hours is not None:
                     lead_times.append(row.lead_time_hours)
                 if row.cycle_eligible:

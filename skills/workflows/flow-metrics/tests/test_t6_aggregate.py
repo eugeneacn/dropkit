@@ -444,6 +444,21 @@ class TestEdges:
         block = aggregate(iter(rows), WINDOW, STATE)
         assert block.unmapped_issuetype == 2
 
+    def test_custom_bucket_does_not_count_as_unmapped(self) -> None:
+        # A user-configured bucket name outside the standard six funnels
+        # to "other" for the distribution emit (the AggregateBlock has a
+        # fixed-shape FlowDistribution) but MUST NOT increment the
+        # unmapped-issuetype counter — that counter only counts true
+        # unmapped (T5 maps None → "other") to drive the notes line.
+        rows = [
+            _delivered(key="A", issuetype_bucket="feature"),
+            _delivered(key="B", issuetype_bucket="compliance"),
+        ]
+        block = aggregate(iter(rows), WINDOW, STATE)
+        assert block.unmapped_issuetype == 0
+        assert block.flow_distribution["other"] == round(1 / 2, 4)
+        assert block.flow_distribution["feature"] == round(1 / 2, 4)
+
     def test_empty_distribution_does_not_divide_by_zero(self) -> None:
         # Zero delivered rows → distribution all-zero, denominator zero.
         block = aggregate(iter([]), WINDOW, STATE)
@@ -461,3 +476,54 @@ class TestEdges:
         assert block.cycle_time_hours.p50 is None
         assert block.cycle_time_hours.p75 is None
         assert block.cycle_time_hours.p90 is None
+
+    def test_rework_rate_value_with_subtasks_excluded_from_throughput(self) -> None:
+        # Spec: rework numerator sums over ALL delivered-in-window rows,
+        # including subtasks. Denominator is throughput (subtask-gated).
+        # Two features (rework=2 each) + one subtask (rework=3): default
+        # flag off → throughput=2, numerator=2+2+3=7, rate=3.5.
+        rows = [
+            _delivered(key="A", issuetype_bucket="feature", rework_count=2),
+            _delivered(key="B", issuetype_bucket="feature", rework_count=2),
+            _delivered(key="S", issuetype_bucket="subtask", rework_count=3),
+        ]
+        block = aggregate(iter(rows), WINDOW, STATE)
+        assert block.throughput == 2
+        assert block.rework_rate == round(7 / 2, 4)
+
+        # With --include-subtasks: throughput=3, numerator still 7,
+        # rate ≈ 2.3333.
+        block_with = aggregate(iter(rows), WINDOW, STATE, include_subtasks=True)
+        assert block_with.throughput == 3
+        assert block_with.rework_rate == round(7 / 3, 4)
+
+    def test_flow_distribution_sums_to_one_with_rounding_pressure(self) -> None:
+        # Three buckets each at exactly 1/3 — each rounds to 0.3333 at
+        # 4dp, sum is 0.9999. Spec's "within 4-dp tolerance" allows this.
+        rows = [
+            _delivered(key="A", issuetype_bucket="feature"),
+            _delivered(key="B", issuetype_bucket="defect"),
+            _delivered(key="C", issuetype_bucket="debt"),
+        ]
+        block = aggregate(iter(rows), WINDOW, STATE)
+        total = sum(block.flow_distribution[b] for b in FLOW_DISTRIBUTION_BUCKETS)
+        assert abs(total - 1.0) <= 1e-4
+
+    def test_lead_time_includes_skipped_commitment_rows(self) -> None:
+        # Spec: Lead Time includes delivered issues that skipped
+        # commitment_state (it is birth-to-delivery, commitment-
+        # independent). Cycle Time excludes them.
+        rows = [
+            _delivered(key="A", lead_time_hours=10.0, cycle_eligible=True, cycle_time_hours=5.0),
+            _delivered(
+                key="B",
+                lead_time_hours=20.0,
+                cycle_eligible=False,
+                cycle_time_hours=None,
+                flow_efficiency=None,
+            ),
+        ]
+        block = aggregate(iter(rows), WINDOW, STATE)
+        assert block.lead_time_hours.n == 2
+        assert block.cycle_time_hours.n == 1
+        assert block.delivered_without_commitment == 1
