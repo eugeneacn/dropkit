@@ -130,10 +130,11 @@ def _ensure_cache_dir(cache_dir: Path) -> None:
 
 
 # Cached at first call: which PerIssueRow fields carry datetime values
-# (directly or as Optional[datetime]). Computed by introspecting the
-# dataclass so the cache module stays robust to PerIssueRow growing
-# new datetime fields.
+# (directly or as Optional[datetime]) and which carry tuples. Computed
+# by introspecting the dataclass so the cache module stays robust to
+# PerIssueRow growing new datetime / tuple fields.
 _DATETIME_FIELD_NAMES: Optional[frozenset] = None
+_TUPLE_FIELD_NAMES: Optional[frozenset] = None
 
 
 def _datetime_field_names() -> frozenset:
@@ -161,6 +162,27 @@ def _datetime_field_names() -> frozenset:
     return _DATETIME_FIELD_NAMES
 
 
+def _tuple_field_names() -> frozenset:
+    """PerIssueRow fields whose annotation is ``Tuple[...]``.
+
+    JSON has no tuple type, so ``asdict`` → ``json.dumps`` → ``json.loads``
+    on a tuple-valued field returns a list. Without re-tupling on read,
+    a cached round-trip would not compare equal to the source row, which
+    breaks both T7's roundtrip equality guarantee and any downstream
+    code that relies on tuple semantics (immutability, hashing).
+    """
+    global _TUPLE_FIELD_NAMES
+    if _TUPLE_FIELD_NAMES is None:
+        names = []
+        hints = get_type_hints(PerIssueRow)
+        for f in fields(PerIssueRow):
+            ann = hints.get(f.name, f.type)
+            if get_origin(ann) is tuple:
+                names.append(f.name)
+        _TUPLE_FIELD_NAMES = frozenset(names)
+    return _TUPLE_FIELD_NAMES
+
+
 def _row_to_json(row: PerIssueRow) -> str:
     d = asdict(row)
     for name in _datetime_field_names():
@@ -173,11 +195,14 @@ def _row_to_json(row: PerIssueRow) -> str:
 def _json_to_row(line: str) -> PerIssueRow:
     d = json.loads(line)
     dt_fields = _datetime_field_names()
+    tup_fields = _tuple_field_names()
     kwargs = {}
     for f in fields(PerIssueRow):
         v = d.get(f.name)
         if v is not None and f.name in dt_fields:
             v = datetime.fromisoformat(v)
+        elif v is not None and f.name in tup_fields and isinstance(v, list):
+            v = tuple(v)
         kwargs[f.name] = v
     return PerIssueRow(**kwargs)
 
