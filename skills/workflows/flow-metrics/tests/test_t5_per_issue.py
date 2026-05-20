@@ -12,7 +12,6 @@ locks in the spec's output-canonicalization rule 4.
 """
 from __future__ import annotations
 
-import copy
 import json
 from dataclasses import fields as dc_fields
 from datetime import date, datetime, timedelta, timezone
@@ -28,8 +27,6 @@ from flow_metrics.config import (
     StateConfig,
     _build_issuetype_config,
     _build_state_config,
-    load_issuetype_config,
-    load_state_config,
     validate_issuetype_config,
     validate_state_config,
 )

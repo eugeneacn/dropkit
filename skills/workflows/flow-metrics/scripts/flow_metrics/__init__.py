@@ -9,7 +9,13 @@ Stdlib only. Python >= 3.10.
 """
 from __future__ import annotations
 
+import argparse
+import os
 import sys
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Optional, Sequence
 
 PYTHON_FLOOR = (3, 10)
 
@@ -33,18 +39,12 @@ def _check_python_version(version_info=None) -> None:
 
 # Run guard BEFORE internal imports so any 3.10+ syntax in sibling modules
 # (T2+: config.py, upstream.py, ...) only parses on a supported interpreter.
-# stdlib imports below are 3.7-safe; internal imports follow.
+# The stdlib imports above are 3.7-safe; siblings below need the guard
+# to print a friendly message instead of a SyntaxError on 3.9 and older.
 _check_python_version()
 
-import argparse
-import os
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
-from typing import Optional, Sequence
-
-from . import clock
-from .upstream import AllowlistError, JiraError, UpstreamNotFoundError
+from . import clock  # noqa: E402  (intentionally after version guard)
+from .upstream import AllowlistError, JiraError, UpstreamNotFoundError  # noqa: E402
 
 
 class ValidationError(Exception):
@@ -387,7 +387,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # task crosses.
         print("error: {}".format(e), file=sys.stderr)
         return EXIT_VALIDATION
-    except JiraError as e:
+    except JiraError:
         # Upstream stderr was already forwarded inside the wrapper; here
         # we only need to translate to the right exit code.
         return EXIT_UPSTREAM

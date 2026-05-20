@@ -26,7 +26,6 @@ from flow_metrics import (
     confirm_overwrite,
     main,
     parse_window,
-    validate_args,
     validate_path,
 )
 

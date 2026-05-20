@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
-from flow_metrics.changelog import ChangelogEntry, iter_issue_changelog
+from flow_metrics.changelog import iter_issue_changelog
 
 
 # ---------------------------------------------------------------------------

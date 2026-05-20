@@ -16,7 +16,7 @@ Stdlib only. Python >= 3.10.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Iterable, List, Mapping, Optional, Tuple
 
 from .changelog import ChangelogEntry, _parse_jira_timestamp
