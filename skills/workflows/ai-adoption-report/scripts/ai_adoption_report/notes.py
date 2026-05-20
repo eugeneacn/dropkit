@@ -135,13 +135,64 @@ class Note:
         raise NotImplementedError("Note.duplicate_scope is a T4 stub")
 
     # ------------------------------------------------------------------
-    # T6 — delta math stubs
+    # T5 — delta math (compute_deltas note factories)
     # ------------------------------------------------------------------
     @classmethod
-    def metric_absent(cls, *args, **kwargs) -> str:
-        """TODO(T6): spec lines 110-112. Literal form:
-        ``"<metric> absent in <file>; cell omitted"``."""
-        raise NotImplementedError("Note.metric_absent is a T6 stub")
+    def metric_absent(cls, metric: str, side_label: str) -> str:
+        """Spec lines 110-112: ``"<metric> absent in <file>; cell omitted"``.
+
+        T5 calls this when a metric key is present on one side of the
+        comparison but missing on the other. ``side_label`` is the
+        per-side label supplied to :func:`compute_deltas` (``"baseline"``
+        / ``"current"`` / ``"cohort"`` / ``"control"`` / a basename in
+        program-mode rollups) — T5 has no access to filenames, so the
+        caller pre-resolves ``<file>`` into the label.
+        """
+        return "{} absent in {}; cell omitted".format(metric, side_label)
+
+    @classmethod
+    def metric_null_on_one_side(cls, metric: str, side_label: str) -> str:
+        """Spec line 331: ``"<metric> null in <which-side> for <scope>"``.
+
+        T5 does not know the scope (it operates on raw aggregate dicts),
+        so it emits the leading clause only. T3 / T6 may later wrap or
+        rewrite if they want to thread the scope through; the stable
+        wording lives here.
+        """
+        return "{} null in {}".format(metric, side_label)
+
+    @classmethod
+    def metric_zero_both_sides(cls, metric: str) -> str:
+        """Spec lines 323-325: ``"<metric> zero on both sides; percent
+        delta undefined"``."""
+        return "{} zero on both sides; percent delta undefined".format(metric)
+
+    @classmethod
+    def n_differs(
+        cls,
+        metric: str,
+        n_a: int,
+        n_b: int,
+        side_labels: Tuple[str, str],
+    ) -> str:
+        """Spec lines 338-345 (per-side ``n`` differs by more than 10%,
+        or zero on either side).
+
+        The spec text describes the *behaviour* ("records the per-side
+        ``n`` values when they differ by more than 10%") but does NOT
+        pin a verbatim wording. T5 introduced the literal form below;
+        spec reviewers should bless or amend.
+
+        Literal form (T5-introduced, not spec-pinned):
+        ``"n-differs: <metric> n=<n_a> in <a_label>, n=<n_b> in <b_label>
+        (>10% delta)"``.
+        """
+        a_label, b_label = side_labels
+        return (
+            "n-differs: {} n={} in {}, n={} in {} (>10% delta)".format(
+                metric, n_a, a_label, n_b, b_label
+            )
+        )
 
 
 __all__ = ["Note"]
