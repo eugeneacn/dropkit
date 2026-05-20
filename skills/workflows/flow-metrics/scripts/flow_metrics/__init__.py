@@ -44,6 +44,7 @@ def _check_python_version(version_info=None) -> None:
 _check_python_version()
 
 from . import clock  # noqa: E402  (intentionally after version guard)
+from .jql import compose_jql as compose_jql  # noqa: E402  (canonical iteration-order anchor)
 from .upstream import AllowlistError, JiraError, UpstreamNotFoundError  # noqa: E402
 
 
@@ -170,29 +171,6 @@ def parse_window(
     from_utc = datetime(from_d.year, from_d.month, from_d.day, tzinfo=timezone.utc)
     to_excl = datetime(to_d.year, to_d.month, to_d.day, tzinfo=timezone.utc) + timedelta(days=1)
     return Window(from_date=from_d, to_date=to_d, from_utc=from_utc, to_exclusive_utc=to_excl)
-
-
-# ---------------------------------------------------------------------------
-# JQL composition
-# ---------------------------------------------------------------------------
-def compose_jql(scope_clause: str, user_clause: Optional[str], *, order_by_key: bool = True) -> str:
-    """Compose a JQL query from a scope clause and an optional user clause.
-
-    Always wraps both clauses in parentheses before ``AND`` (spec § Inputs,
-    Decision #15). Appends ``ORDER BY key ASC`` for canonical iteration
-    order unless suppressed (spec § Output canonicalization).
-
-    Used identically for ``--jql`` (Jira) and ``--align-filter`` (Jira
-    Align OData) at the string-shape level — both follow the same
-    parenthesization rule.
-    """
-    if user_clause is not None and user_clause.strip() != "":
-        body = "({}) AND ({})".format(scope_clause, user_clause)
-    else:
-        body = scope_clause
-    if order_by_key:
-        return body + " ORDER BY key ASC"
-    return body
 
 
 # ---------------------------------------------------------------------------
