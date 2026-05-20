@@ -170,6 +170,28 @@ class TestConstruction:
             for line in out
         )
 
+    def test_notes_include_empty_cohort(self) -> None:
+        """Spec § "Cohort behaviour" test ``test_empty_cohort_does_not_exit_nonzero``
+        pins the behaviour; T11 owns the wording. Cohort.py invokes this
+        when the resolved cohort key set is disjoint from in-scope rows."""
+        notes = NotesCollector()
+        notes.add_empty_cohort()
+        out = notes.finalize()
+        assert any("cohort" in line and "zero" in line.lower() for line in out)
+
+    def test_notes_include_per_team_double_counted(self) -> None:
+        """T9's ``test_per_team_array_kind_double_count_flagged`` exercises
+        the call site via MagicMock; this is the collector-level unit
+        test. Wording per T9 plan fixture: "K issues belong to multiple
+        teams and are counted in each"."""
+        notes = NotesCollector()
+        notes.add_per_team_double_counted(2)
+        out = notes.finalize()
+        assert any(
+            "per_team" in line and "2" in line and "multiple teams" in line
+            for line in out
+        )
+
 
 # ---------------------------------------------------------------------------
 # Collector behaviour (dedup, idempotency, non-destructive finalize)
