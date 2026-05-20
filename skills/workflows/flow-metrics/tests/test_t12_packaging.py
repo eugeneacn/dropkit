@@ -121,18 +121,29 @@ def test_skill_md_security_rules_present() -> None:
     1. ``"read-only"`` — the upstream-skill allowlist contract.
     2. ``"credentials.env"`` — credential isolation (this skill never
        reads the upstream skill's credential file).
-    3. ``"write verb"`` — the no-write-verb posture (alternative
-       phrasings ``"no write"`` / ``"no PUT/POST/DELETE"`` would also
-       satisfy the spirit; we standardise on ``"write verb"`` because
-       the spec uses that phrasing in §"Read-only contract").
+    3. The no-write-verb posture. Accepted phrasings (any one suffices):
+       ``"write verb"`` (spec phrasing in §"Read-only contract"),
+       ``"no write"``, ``"no put/post/delete"``,
+       ``"no post/put/patch/delete"``. The test accepts any of these so
+       a reviewer rephrasing the security section faithful to the spec
+       does not need to also edit this test. If you want to add a
+       further synonym, add it to ``write_phrasings`` below.
     """
     text = SKILL_MD.read_text(encoding="utf-8").lower()
     assert "read-only" in text, "SKILL.md must mention 'read-only' contract"
     assert "credentials.env" in text, (
         "SKILL.md must explicitly name 'credentials.env' as the credential file this skill never reads"
     )
-    assert "write verb" in text, (
-        "SKILL.md must mention the no-'write verb' posture; if the wording changes, update this test too"
+    write_phrasings = (
+        "write verb",
+        "no write",
+        "no put/post/delete",
+        "no post/put/patch/delete",
+        "no post / put / patch / delete",
+    )
+    assert any(p in text for p in write_phrasings), (
+        "SKILL.md must mention the no-write-verb posture; "
+        "accepted phrasings: {}".format(", ".join(repr(p) for p in write_phrasings))
     )
 
 
@@ -196,8 +207,9 @@ _HANDLED_KEYWORDS = frozenset({
     "$schema", "$id", "$ref", "$defs",
     "title", "description",
     "type", "properties", "required", "additionalProperties",
-    "items", "enum", "pattern",
+    "items", "enum", "pattern", "const", "uniqueItems",
     "minimum", "maximum",
+    "oneOf",
 })
 
 
@@ -240,6 +252,18 @@ def _validate(value: Any, schema: Dict[str, Any], root: Dict[str, Any], path: st
     unknown = set(schema.keys()) - _HANDLED_KEYWORDS
     if unknown:
         raise _SchemaError("validator does not handle schema keywords {} at {}".format(unknown, path))
+    if "oneOf" in schema:
+        matches = 0
+        for branch in schema["oneOf"]:
+            try:
+                _validate(value, branch, root, path)
+                matches += 1
+            except _SchemaError:
+                pass
+        if matches != 1:
+            raise _SchemaError(
+                "oneOf at {} matched {} branches; expected exactly 1".format(path, matches)
+            )
     type_field = schema.get("type")
     if type_field is not None:
         types = type_field if isinstance(type_field, list) else [type_field]
@@ -248,6 +272,9 @@ def _validate(value: Any, schema: Dict[str, Any], root: Dict[str, Any], path: st
     if "enum" in schema:
         if value not in schema["enum"]:
             raise _SchemaError("enum mismatch at {}: {!r} not in {}".format(path, value, schema["enum"]))
+    if "const" in schema:
+        if value != schema["const"]:
+            raise _SchemaError("const mismatch at {}: {!r} != {!r}".format(path, value, schema["const"]))
     if "pattern" in schema and isinstance(value, str):
         if not re.search(schema["pattern"], value):
             raise _SchemaError("pattern mismatch at {}: {!r} !~ {}".format(path, value, schema["pattern"]))
@@ -277,6 +304,15 @@ def _validate(value: Any, schema: Dict[str, Any], root: Dict[str, Any], path: st
         if items is not None:
             for i, v in enumerate(value):
                 _validate(v, items, root, "{}[{}]".format(path, i))
+        if schema.get("uniqueItems") is True:
+            # JSON-equivalence dedup: hashable values use set; unhashable
+            # (dict / list) get json-encoded for membership testing.
+            seen: list = []
+            for i, v in enumerate(value):
+                key = json.dumps(v, sort_keys=True) if isinstance(v, (dict, list)) else v
+                if key in seen:
+                    raise _SchemaError("uniqueItems violated at {}[{}]: duplicate {!r}".format(path, i, v))
+                seen.append(key)
 
 
 def _validate_against_schema(instance: Any, schema: Dict[str, Any]) -> None:
@@ -396,19 +432,24 @@ def test_output_json_validates_against_schema() -> None:
     assert [row["team"] for row in payload_pt["per_team"]] == ["Bar", "Foo"]
 
 
-def test_output_schema_rejects_unrequested_metric_as_null() -> None:
+def test_output_schema_rejects_unknown_metric_in_aggregates() -> None:
     """Schema enforces the unrequested-metrics-are-absent rule.
 
-    A payload that emits an unrequested metric as ``null`` (a common
-    bug shape) must be rejected by the schema. additionalProperties:
-    false on aggregates is what makes this machine-checkable.
+    ``aggregates.additionalProperties: false`` is what makes the rule
+    machine-checkable: a renderer regression that emits a metric key
+    the spec doesn't define (typo, leaked internal counter, future
+    metric not yet on the schema) must fail validation. This test
+    feeds an aggregates dict with a name not in the schema's
+    ``properties`` map — the only way it can pass is via
+    ``additionalProperties``, so removing the ``: false`` would
+    silently let it through.
     """
     schema = _load_schema()
     bad_payload = {
         "meta": _golden_meta(),
         "aggregates": {
             "throughput": 1,
-            "lead_time_hours": None,
+            "surprise_metric": 42,
         },
         "notes": [],
     }
@@ -416,8 +457,124 @@ def test_output_schema_rejects_unrequested_metric_as_null() -> None:
         _validate_against_schema(bad_payload, schema)
     except _SchemaError:
         return
-    raise AssertionError("schema accepted a null-valued metric in aggregates; "
-                         "unrequested-metrics rule is not enforced")
+    raise AssertionError(
+        "schema accepted an unknown key inside aggregates; "
+        "additionalProperties: false is not enforced — unrequested-"
+        "metrics-are-absent rule is not machine-checkable"
+    )
+
+
+def _empty_block() -> AggregateBlock:
+    """An AggregateBlock matching the empty-cohort / empty-project shape:
+    every percentile null, throughput 0, rework_rate null."""
+    return AggregateBlock(
+        cycle_time_hours=_percentile(None, None, None, 0),
+        lead_time_hours=_percentile(None, None, None, 0),
+        flow_time_hours=_percentile(None, None, None, 0),
+        throughput=0,
+        wip=0,
+        flow_load=0.0,
+        rework_rate=None,
+        flow_efficiency=_percentile(None, None, None, 0),
+        flow_distribution={
+            "feature": 0.0, "defect": 0.0, "debt": 0.0,
+            "risk": 0.0, "subtask": 0.0, "other": 0.0,
+        },
+        flow_distribution_denominator=0,
+        defect_ratio=0.0,
+        cancelled_in_window=0,
+        delivered_without_commitment=0,
+        flow_efficiency_zero_denominator=0,
+        unmapped_issuetype=0,
+        flow_load_sample_count=91,
+    )
+
+
+def test_output_schema_accepts_null_percentiles_for_empty_aggregate() -> None:
+    """Schema must permit null p50/p75/p90 + null rework_rate (spec:
+    percentiles are null when n<2; rework_rate is null when throughput
+    is 0). Two locations exercise the null shape:
+
+    1. Top-level ``aggregates`` (empty-project scope — exits 0).
+    2. ``cohort_breakdown.cohort`` (empty cohort — exits 0).
+
+    A schema regression that tightened any percentile field to
+    ``"number"`` only would be caught at either site; both are
+    exercised so a refactor that breaks only one site doesn't sneak
+    through.
+    """
+    schema = _load_schema()
+    # 1. Top-level empty aggregate.
+    report_empty = Report(
+        aggregate=_empty_block(),
+        meta=_golden_meta(),
+        notes=[],
+        metrics_requested=list(CANONICAL_METRICS_ORDER),
+    )
+    payload_empty = json.loads(render_json(report_empty).decode("utf-8"))
+    _validate_against_schema(payload_empty, schema)
+    assert payload_empty["aggregates"]["throughput"] == 0
+    assert payload_empty["aggregates"]["cycle_time_hours"]["p50"] is None
+    assert payload_empty["aggregates"]["rework_rate"] is None
+
+    # 2. Empty cohort inside cohort_breakdown.
+    report_empty_cohort = Report(
+        aggregate=_golden_block(),
+        meta=_golden_meta(cohort_jql="labels = ai-assisted"),
+        notes=[],
+        metrics_requested=list(CANONICAL_METRICS_ORDER),
+        cohort_breakdown={"cohort": _empty_block(), "control": _golden_block()},
+    )
+    payload_cohort = json.loads(render_json(report_empty_cohort).decode("utf-8"))
+    _validate_against_schema(payload_cohort, schema)
+    cohort = payload_cohort["cohort_breakdown"]["cohort"]
+    assert cohort["throughput"] == 0
+    assert cohort["cycle_time_hours"]["p50"] is None
+    assert cohort["rework_rate"] is None
+
+
+def test_output_schema_rejects_scope_with_no_keys() -> None:
+    """``meta.scope`` must satisfy oneOf {project, program_id, portfolio_id}.
+
+    A renderer regression that emits ``"scope": {}`` (which would be
+    consumer-poisoning — the report has no scope label) must fail
+    validation. The first review flagged the symmetric gap on
+    aggregates' ``additionalProperties: false``; this is the scope-side
+    analog.
+    """
+    schema = _load_schema()
+    bad_meta = _golden_meta()
+    bad_meta["scope"] = {}
+    bad_payload = {
+        "meta": bad_meta,
+        "aggregates": {},
+        "notes": [],
+    }
+    try:
+        _validate_against_schema(bad_payload, schema)
+    except _SchemaError:
+        return
+    raise AssertionError("schema accepted meta.scope = {}; scope oneOf is not enforced")
+
+
+def test_output_schema_rejects_scope_with_two_keys() -> None:
+    """``meta.scope`` must NOT have both project and program_id set."""
+    schema = _load_schema()
+    bad_meta = _golden_meta()
+    bad_meta["scope"] = {"project": "PROJ", "program_id": "42"}
+    bad_payload = {
+        "meta": bad_meta,
+        "aggregates": {},
+        "notes": [],
+    }
+    try:
+        _validate_against_schema(bad_payload, schema)
+    except _SchemaError:
+        return
+    raise AssertionError(
+        "schema accepted meta.scope with both project and program_id; "
+        "scope oneOf is not enforced (or matches 2 branches, which would be a validator bug)"
+    )
 
 
 def test_output_schema_rejects_unknown_top_level_key() -> None:

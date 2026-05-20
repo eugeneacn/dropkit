@@ -1,0 +1,14 @@
+[tool.pytest.ini_options]
+# Use importlib-based test discovery so two `tests/` packages in
+# different directories (the root `tests/` for the kit-installer and
+# `skills/workflows/<skill>/tests/` for each shipped skill) do not
+# collide on the top-level module name. With the default `prepend`
+# import mode, both directories would be imported as `tests`, and
+# pytest fails collection on the second one.
+#
+# testpaths is intentionally omitted: pytest's default rootdir-relative
+# discovery walks the tree and picks up every skill's tests/ directory
+# without requiring this file to enumerate them. A new skill added
+# under skills/workflows/<name>/tests/ is discovered automatically;
+# adding an explicit testpaths list would silently exclude it.
+addopts = "--import-mode=importlib"

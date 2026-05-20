@@ -2,7 +2,7 @@
 name: flow-metrics
 description: Use this skill when the user asks for DORA / Flow Framework metrics over a Jira scope — "what's our cycle time this quarter for PROJ", "give me throughput and WIP for the Foo team", "compare flow efficiency before/after the AI-pairing rollout via a cohort split", "rollup flow metrics across program 42". Computes cycle time, lead time, throughput, WIP, flow load, rework rate, flow efficiency, flow distribution, and defect ratio from Jira changelogs (optionally joined with Jira Align for program / portfolio scope). Read-only — never transitions, comments, creates, updates, or deletes Jira data. Do NOT use for live-dashboard streaming, deployment-event metrics (Change Failure Rate / MTTR proper), or anything requiring a tracker that isn't Jira.
 metadata:
-  version: "0.1"
+  version: "0.1.0"
 ---
 
 # Skill: flow-metrics
@@ -61,16 +61,27 @@ Before computing metrics, confirm:
 
 ## Invocation
 
-The skill is a single CLI. The entry point is the
-`flow_metrics` package; invoke it as:
+The skill ships one CLI. Two equivalent forms (both call the same
+`flow_metrics.main`):
 
 ```bash
+# Kit-installer install — exposes a `flow-metrics` shim on PATH:
+flow-metrics --project PROJ
+
+# Dropkit clone or any environment where the package is on PYTHONPATH:
 python -m flow_metrics --project PROJ
 ```
 
-(when the package is on `PYTHONPATH`, e.g. as installed by the
-kit-installer; from a dropkit clone, the `scripts/` directory needs to
-be on the path).
+The spec's examples use the bare `flow-metrics` form. From a dropkit
+clone (before kit-installer ships), add the package to PYTHONPATH:
+
+```bash
+export PYTHONPATH="$(pwd)/skills/workflows/flow-metrics/scripts:$PYTHONPATH"
+python -m flow_metrics --help
+```
+
+Every example below uses the bare form; substitute `python -m
+flow_metrics` if you're invoking from a clone.
 
 ### CLI flags
 
@@ -138,7 +149,7 @@ Each example is a literal command line the agent can run.
 ### Project-scope, default 90-day window
 
 ```bash
-python -m flow_metrics --project PROJ
+flow-metrics --project PROJ
 ```
 
 JSON to stdout. The shipped default state config maps the common Jira
@@ -148,7 +159,7 @@ box.
 ### Project-scope with a specific window and JQL filter
 
 ```bash
-python -m flow_metrics \
+flow-metrics \
   --project PROJ \
   --from 2026-02-01 --to 2026-04-30 \
   --jql 'labels = ai-assisted AND component = checkout'
@@ -157,7 +168,7 @@ python -m flow_metrics \
 ### Jira Align program scope (joins via Jira Align)
 
 ```bash
-python -m flow_metrics \
+flow-metrics \
   --program-id 42 \
   --align-join-field "Program ID" \
   --from 2026-02-01 --to 2026-04-30
@@ -169,7 +180,7 @@ config provides it.
 ### Cohort split (A/B comparison)
 
 ```bash
-python -m flow_metrics \
+flow-metrics \
   --project PROJ \
   --cohort-jql 'labels = ai-assisted' \
   --format json
@@ -182,7 +193,7 @@ sides. Cohort-jql matching zero issues produces an empty cohort with
 ### Filter to a subset of metrics
 
 ```bash
-python -m flow_metrics \
+flow-metrics \
   --project PROJ \
   --metrics throughput,cycle_time,defect_ratio
 ```
@@ -194,7 +205,7 @@ separate keys — requesting one does not auto-include the other.
 ### Bypass the on-disk cache
 
 ```bash
-python -m flow_metrics --project PROJ --no-cache
+flow-metrics --project PROJ --no-cache
 ```
 
 Use when the underlying Jira data has changed and you suspect cache
@@ -204,7 +215,7 @@ staleness. Cache lives at
 ### Per-issue dump (downstream consumer input)
 
 ```bash
-python -m flow_metrics \
+flow-metrics \
   --project PROJ \
   --per-issue \
   --output .context/flow-metrics/per-issue.jsonl

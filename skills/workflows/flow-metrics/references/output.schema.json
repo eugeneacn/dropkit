@@ -101,7 +101,12 @@
         "team":         { "type": "string" },
         "program_id":   { "type": "string" },
         "portfolio_id": { "type": "string" }
-      }
+      },
+      "oneOf": [
+        { "required": ["project"] },
+        { "required": ["program_id"] },
+        { "required": ["portfolio_id"] }
+      ]
     },
     "window": {
       "type": "object",
@@ -139,6 +144,7 @@
         "metrics_requested": {
           "type": "array",
           "description": "Resolved --metrics list in canonical --metrics enumeration order (NOT lexicographic). Deduplicated; unknown names dropped at the renderer.",
+          "uniqueItems": true,
           "items": {
             "type": "string",
             "enum": [
@@ -150,8 +156,16 @@
         },
         "state_config_sha":        { "type": "string" },
         "issuetype_config_sha":    { "type": "string" },
-        "generated_at":            { "type": "string", "description": "ISO-8601 UTC timestamp with a 'Z' suffix." },
-        "schema_version":          { "type": "string" },
+        "generated_at": {
+          "type": "string",
+          "description": "ISO-8601 UTC timestamp with a 'Z' suffix.",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?Z$"
+        },
+        "schema_version": {
+          "type": "string",
+          "description": "Wire-format version. v1 is pinned at '1.0'.",
+          "const": "1.0"
+        },
         "per_team_double_counted": { "type": "boolean" },
         "cohort_jql": {
           "type": "string",
