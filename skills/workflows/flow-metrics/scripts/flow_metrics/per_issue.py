@@ -77,6 +77,13 @@ class PerIssueRow:
     cancelled_in_window: bool
     wip_at_to: bool
     wip_samples: Tuple[bool, ...] = field(default_factory=tuple)
+    # Full team list for array-kind team_field semantics — ``team`` keeps
+    # the first non-empty entry for backward compat with single-value
+    # consumers; ``teams`` is the complete list T9's per_team rollup
+    # needs to count one issue in every membership bucket. For
+    # ``single_value`` kind, ``teams`` is a one-element tuple
+    # ``(team,)`` (or ``(NO_TEAM,)`` when the field is missing).
+    teams: Tuple[str, ...] = field(default_factory=tuple)
     cohort: Optional[bool] = None
 
 
@@ -84,45 +91,86 @@ def _hours_between(start: datetime, end: datetime) -> float:
     return (end - start).total_seconds() / 3600.0
 
 
-def _resolve_team(issue: Mapping, state_config: StateConfig) -> str:
-    """Return the team string for the issue's row.
+def _name_from_item(item: Any) -> Optional[str]:
+    """Pull the team-name string out of a single raw catalog entry.
+
+    Accepts plain strings or option-dict shapes ({value, name}); returns
+    None for empty / unrecognised entries.
+    """
+    if isinstance(item, str):
+        return item if item else None
+    if isinstance(item, Mapping):
+        for k in ("value", "name"):
+            v = item.get(k)
+            if isinstance(v, str) and v:
+                return v
+    return None
+
+
+def _resolve_teams(issue: Mapping, state_config: StateConfig) -> Tuple[str, Tuple[str, ...]]:
+    """Return ``(primary_team, full_team_list)`` for the issue's row.
+
+    ``primary_team`` is the first non-empty team name (matching the
+    pre-T13 ``_resolve_team`` contract pinned by T5's per-issue tests).
+    ``full_team_list`` is the deduplicated tuple of every team name on
+    the issue — used by T9's per_team rollup under ``array`` kind to
+    bucket one issue into every team's row.
 
     Field-level permission undercount: if ``team_field.id`` is missing
-    or null on the issue, the row's ``team`` is the synthetic string
-    ``"(no team)"``. The aggregator (T6) counts these and emits a
-    ``notes`` line — that aggregation is downstream of this function.
+    or the issue's value is null / empty / unrecognised, returns
+    ``(NO_TEAM, ())``. Downstream callers translate the empty list into
+    a single ``NO_TEAM`` bucket; the empty tuple is the signal "this
+    issue carried no readable team membership" so T9's K-count for
+    array kind doesn't include it.
 
-    Supports ``team_field.kind`` in ``{single_value, array}``. For
-    ``array``, the per-issue row carries the first non-empty team name;
-    full overlap semantics (an issue counted in every team's rollup)
-    live in T9's aggregator. ``user_picker_group`` is deferred to v2.
+    For ``single_value`` kind, ``full_team_list`` is always a
+    one-element tuple ``(primary_team,)`` so the iteration shape is
+    uniform across kinds.
     """
     tf = state_config.team_field
+    no_match: Tuple[str, Tuple[str, ...]] = (NO_TEAM, ())
     if tf is None or tf.id is None:
-        return NO_TEAM
+        return no_match
     fields = issue.get("fields") or {}
     raw = fields.get(tf.id)
     if raw is None:
-        return NO_TEAM
-    if isinstance(raw, str):
-        return raw if raw else NO_TEAM
-    if isinstance(raw, Mapping):
-        for k in ("value", "name"):
-            v = raw.get(k)
-            if isinstance(v, str) and v:
-                return v
-        return NO_TEAM
+        return no_match
+
+    # String / option-dict shapes are inherently single-valued.
+    if isinstance(raw, (str, Mapping)):
+        name = _name_from_item(raw)
+        if name is None:
+            return no_match
+        return name, (name,)
+
+    # Array shape — dedupe in encounter order so the per_team rollup
+    # sees one bucket per distinct team (matches bucket_by_team's own
+    # per-row dedup; we dedup here so PerIssueRow.teams is the canonical
+    # source).
     if isinstance(raw, list):
+        seen: set = set()
+        out: list = []
         for item in raw:
-            if isinstance(item, str) and item:
-                return item
-            if isinstance(item, Mapping):
-                for k in ("value", "name"):
-                    v = item.get(k)
-                    if isinstance(v, str) and v:
-                        return v
-        return NO_TEAM
-    return NO_TEAM
+            n = _name_from_item(item)
+            if n is None or n in seen:
+                continue
+            seen.add(n)
+            out.append(n)
+        if not out:
+            return no_match
+        return out[0], tuple(out)
+
+    return no_match
+
+
+def _resolve_team(issue: Mapping, state_config: StateConfig) -> str:
+    """Backward-compat shim — returns just the primary team.
+
+    Kept so existing T5 contract tests
+    (``test_per_issue_team_resolves_*``) that imported the original
+    helper symbol keep passing.
+    """
+    return _resolve_teams(issue, state_config)[0]
 
 
 def _first_commitment_at_or_before(
@@ -267,7 +315,7 @@ def derive_row(
                     (first_commitment_at, first_delivery_at),
                 )
 
-    team = _resolve_team(issue, state_config)
+    team, teams = _resolve_teams(issue, state_config)
 
     return PerIssueRow(
         key=str(issue.get("key", "")),
@@ -286,6 +334,7 @@ def derive_row(
         cancelled_in_window=cancelled,
         wip_at_to=wip,
         wip_samples=wip_samples,
+        teams=teams,
         cohort=None,
     )
 

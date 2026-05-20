@@ -49,7 +49,7 @@ from typing import (
 from .per_issue import PerIssueRow
 
 
-CACHE_SCHEMA_VERSION = "1.0"
+CACHE_SCHEMA_VERSION = "1.1"  # 1.1: PerIssueRow grew the `teams` tuple field
 STALE_TMP_AGE_SECONDS = 3600
 TMP_GLOB = "*.tmp"
 _PROGRAM_SCOPE_KINDS = frozenset({"program", "portfolio"})

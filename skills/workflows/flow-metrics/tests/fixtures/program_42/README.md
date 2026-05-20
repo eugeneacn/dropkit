@@ -19,16 +19,25 @@ Hand-authored. Exercises the program-scope code path:
 
 ## Issues
 
-| Key     | Type  | customfield_10001 | Pattern                          |
-|---------|-------|-------------------|----------------------------------|
-| PROG-1  | Story | Alpha             | Delivered: BL→IP→Done in window  |
-| PROG-2  | Bug   | Beta              | Delivered: BL→IP→Done in window  |
-| PROG-3  | Story | Alpha             | WIP-only: pre-window IP          |
-| PROG-4  | Story | (missing)         | Delivered, exercises `(no team)` |
+| Key     | Type  | customfield_10001     | Pattern                          |
+|---------|-------|-----------------------|----------------------------------|
+| PROG-1  | Story | `"Alpha"`             | Delivered: BL→IP→Done in window  |
+| PROG-2  | Bug   | `"Beta"`              | Delivered: BL→IP→Done in window  |
+| PROG-3  | Story | `"Alpha"`             | WIP-only: pre-window IP          |
+| PROG-4  | Story | `null`                | Delivered, exercises `(no team)` |
+| PROG-5  | Story | `[{Alpha}, {Beta}]`   | Delivered, multi-team membership |
 
 PROG-4's missing team field surfaces the field-level permission-undercount
 notes line `per_team: 1 issues had no readable team_field value; bucketed
 as '(no team)'`.
+
+PROG-5 carries an array-shaped team value. Under the default
+single_value state config the per-issue derivation picks the first
+entry (`"Alpha"`), so PROG-5 lands in Alpha's bucket only — same as
+PROG-1 / PROG-3. Under the array-kind override (`state.array.json`),
+PROG-5's row carries `teams = ("Alpha", "Beta")` and per_team buckets
+it into **both** Alpha and Beta — bumping `K`, the count of multi-team
+issues — and meta.per_team_double_counted flips to `true`.
 
 ## Files
 

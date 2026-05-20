@@ -505,13 +505,24 @@ def test_full_happy_path_program_scope(integration_sandbox):
 
 def test_full_happy_path_program_scope_array_kind(integration_sandbox):
     """Same program-42 fixture but with ``team_field.kind = array`` — flips
-    ``meta.per_team_double_counted`` to ``true``.
+    ``meta.per_team_double_counted`` to ``true`` AND actually buckets
+    multi-team issues into every team's row.
 
     Together with ``test_full_happy_path_program_scope`` (single_value /
-    false) this covers both branches of the per-team double-count flag,
-    per the brief: "Synthetic align responses must trigger
+    false) this covers both branches of the per-team double-count flag.
+    The brief: "Synthetic align responses must trigger
     meta.per_team_double_counted = true in one scenario and false in
     another."
+
+    Asserts the substantive semantics, not just the flag:
+    - PROG-5's team field is ``[Alpha, Beta]``; under single_value kind
+      the per-issue row picks ``Alpha`` only, so Alpha=2 / Beta=1 (PROG-1
+      + PROG-3 + PROG-5 in Alpha; PROG-2 in Beta).
+    - Under array kind, PROG-5 lands in BOTH Alpha and Beta, so Alpha=2 /
+      Beta=2; ``sum(per_team[*].throughput) > aggregates.throughput`` —
+      precisely the "double-counting by design" the spec describes.
+    - The per_team notes line ``"per_team: K issues belong to multiple
+      teams"`` carries K = 1 (just PROG-5).
     """
     integration_sandbox.use_fixture("program_42")
     state_override = PROGRAM_42 / "state.array.json"
@@ -527,3 +538,20 @@ def test_full_happy_path_program_scope_array_kind(integration_sandbox):
 
     payload = json.loads(_substitute_generated_at(stdout).decode("utf-8"))
     assert payload["meta"]["per_team_double_counted"] is True
+
+    teams = {r["team"]: r["aggregates"]["throughput"] for r in payload["per_team"]}
+    assert teams.get("Alpha") == 2, "Alpha bucket should hold PROG-1 + PROG-5"
+    assert teams.get("Beta") == 2, "Beta bucket should hold PROG-2 + PROG-5 (double-counted)"
+    # Sum of per-team throughput > global throughput because PROG-5 is
+    # counted in two buckets — this is the documented array-kind contract.
+    assert (
+        sum(teams.values()) > payload["aggregates"]["throughput"]
+    ), "array kind must double-count multi-team issues across buckets"
+    # K=1 notes line is present.
+    k_lines = [
+        n for n in payload["notes"]
+        if n.startswith("per_team: ") and "belong to multiple teams" in n
+    ]
+    assert len(k_lines) == 1 and k_lines[0].startswith("per_team: 1 issues"), (
+        "expected K=1 multi-team note; got: {}".format(k_lines)
+    )

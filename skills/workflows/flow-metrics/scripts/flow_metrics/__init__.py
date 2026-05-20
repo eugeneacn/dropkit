@@ -584,20 +584,18 @@ def _run_pipeline(args: argparse.Namespace, window: "Window") -> int:
         scope_kind == "project" and len(distinct_teams) > 1
     )
     if should_per_team and rows:
-        # Array-kind team fields require a teams_for_row callable to
-        # enumerate full team lists; T5's per-issue derivation only
-        # carries the first team on the row. v1 main() supplies a
-        # single-value-equivalent callable for array kind so the
-        # pipeline runs to completion and meta.per_team_double_counted
-        # flips True per spec; full array semantics (the same issue
-        # counted in every team's row) needs the raw issue dict on
-        # the row, which is a larger refactor of T5's derive path.
-        # Tracked separately from T13.
-        def _single_value_teams_cb(r):
-            return (r.team,)
+        # Array-kind team_field: enumerate the full membership list per
+        # row so an issue with N>1 teams lands in each team's bucket.
+        # The list is canonical on the row (T5 derive_row populates
+        # ``teams`` deduped, in encounter order) — bucket_by_team
+        # dedupes within the row again defensively. NO_TEAM rows have
+        # an empty ``teams`` tuple; bucket_by_team's "no teams →
+        # NO_TEAM bucket" branch handles that.
+        def _array_teams_cb(r):
+            return r.teams
 
         if team_field is not None and team_field.kind == "array":
-            teams_cb = _single_value_teams_cb
+            teams_cb = _array_teams_cb
         else:
             teams_cb = None
         buckets = bucket_by_team(

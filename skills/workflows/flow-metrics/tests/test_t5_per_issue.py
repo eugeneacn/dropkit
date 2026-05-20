@@ -794,13 +794,18 @@ class TestConstruction:
         assert row.wip_at_to is False
 
         # The spec example carries exactly these field names — verify each
-        # appears on the dataclass (cohort is the optional add at the end).
+        # appears on the dataclass. ``cohort`` (T8) and ``teams`` (T13
+        # array-kind extension) are non-spec internal-use fields appended
+        # at the end; the JSONL serializer drops ``teams`` (single-team
+        # consumers read ``team`` instead) and emits ``cohort`` only when
+        # tag_cohort has stamped it.
         expected_fields = {
             "key", "issue_created", "first_commitment_at", "first_delivery_at",
             "cycle_eligible", "cycle_time_hours", "lead_time_hours",
             "flow_efficiency", "rework_count", "issuetype_at_delivery",
             "issuetype_bucket", "team", "delivered_in_window",
-            "cancelled_in_window", "wip_at_to", "wip_samples", "cohort",
+            "cancelled_in_window", "wip_at_to", "wip_samples", "teams",
+            "cohort",
         }
         assert {f.name for f in dc_fields(PerIssueRow)} == expected_fields
 
