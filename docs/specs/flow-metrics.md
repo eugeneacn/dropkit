@@ -18,11 +18,13 @@ portfolio over a time window. It orchestrates the existing `jira` and
 `jira-align` skills, walks status-change history to derive time-in-state, and
 emits a uniform JSON (or CSV) report.
 
-The skill is the **foundation layer** of the AI-adoption metrics stack
-proposed in the research note (research → 2026-05-19, this chat). The three
-downstream skills — `ai-adoption-baseline`, `ai-adoption-cohort`, and
-`ai-value-report` — all call `flow-metrics` for the actual math and add
-window selection, comparison, and rollup on top.
+The skill is the **foundation layer** of the AI-adoption metrics
+stack. The downstream `ai-adoption-report` skill consumes
+`flow-metrics` JSON outputs and renders deltas across three modes —
+`baseline` (one scope, two windows), `cohort` (within-window AI vs
+control split), and `program` (rollup across scopes for one window).
+`flow-metrics` does all the math; the report pairs files and
+subtracts.
 
 ## Why
 
@@ -51,19 +53,21 @@ In priority order — first is the load-bearing one:
    `flow-metrics --project PROJ --team "Foo" --from 2026-02-19 --to 2026-05-19`.
    Result: a JSON report with cycle time, lead time, throughput, WIP,
    rework rate, defect ratio, broken down by Jira issuetype. Pure read on Jira.
-2. **Cohort prep for `ai-adoption-cohort`.**
-   `flow-metrics --project PROJ --from ... --to ... --cohort-jql "labels = ai-assisted" --per-issue --output cohort.jsonl`.
-   Result: one JSONL row per issue with all derived fields and a `cohort`
-   boolean. The cohort skill consumes this.
+2. **Cohort prep for `ai-adoption-report cohort`.**
+   `flow-metrics --project PROJ --from ... --to ... --cohort-jql "labels = ai-assisted" --output q4.json`.
+   Result: aggregate JSON with a `cohort_breakdown` block. The report's
+   cohort mode reads that block directly. (Per-issue output via
+   `--per-issue --output rows.jsonl` is also supported; consumers that
+   need per-issue inspection re-aggregate from the rows.)
 3. **Value-stream / ART rollup via Jira Align.**
    `flow-metrics --program-id 42 --from ... --to ...`.
    Result: Flow Distribution, Flow Load, Flow Efficiency, and per-team
    throughput across all teams in program 42. Joins Jira (for time-in-state)
    with Jira Align (for program/team mapping).
-4. **Portfolio-level snapshot for `ai-adoption-baseline`.**
+4. **Portfolio-level snapshot for `ai-adoption-report baseline`.**
    `flow-metrics --portfolio-id 7 --from 2025-08-19 --to 2025-11-19 --output .context/baseline.json`.
-   Result: same metrics, rolled up per team within the portfolio, ready to
-   be snapshotted by the baseline skill.
+   Result: same metrics, rolled up per team within the portfolio, ready
+   to be paired with a later window by the report's baseline mode.
 5. **Quick sanity check, one project, default window.**
    `flow-metrics --project PROJ`.
    Result: last-90-days JSON to stdout. Should "just work" with the
@@ -134,8 +138,8 @@ membership. The two output modes differ:
   in v1 (deferred).
 - **Per-issue mode (`--per-issue`):** every JSONL row includes
   `"cohort": true|false`. `cohort_breakdown` is **NOT** emitted in this
-  mode — downstream skills (`ai-adoption-cohort`) re-aggregate from the
-  per-issue rows. This keeps the breakdown logic in exactly one place.
+  mode — downstream consumers re-aggregate from the per-issue rows.
+  This keeps the breakdown logic in exactly one place.
 
 When `--cohort-jql` matches zero issues, the cohort sub-object has
 `throughput: 0` and every percentile is `null`; the skill exits 0.
@@ -349,8 +353,9 @@ Examples:
 
 This means the rework_rate of cohort + control does **not** weighted-
 average to the global rework_rate when cohort and control sizes differ;
-that's intentional and is the property the downstream
-`ai-adoption-cohort` skill relies on.
+that's intentional and is the property `ai-adoption-report` (cohort
+and program modes) relies on when rolling up cohort and control sides
+independently across scopes.
 
 **Population-rule rationale.** Anchoring every metric on "first-ever
 delivery falls in window" gives one consistent population. Post-delivery
@@ -399,8 +404,28 @@ denominator (current throughput) doesn't include the issue. A v2 metric
     "defect_ratio":         0.1961
   },
   "cohort_breakdown": {
-    "cohort":  { "throughput": 31, "cycle_time_hours": { "p50": 28.0, "p75": 60.0, "p90": 120.0, "n": 31 }, "rework_rate": 0.55 },
-    "control": { "throughput": 53, "cycle_time_hours": { "p50": 44.0, "p75": 110.0, "p90": 200.0, "n": 53 }, "rework_rate": 0.33 }
+    "cohort":  {
+      "throughput": 31,
+      "cycle_time_hours": { "p50": 28.0, "p75": 60.0, "p90": 120.0, "n": 31 },
+      "rework_rate": 0.55,
+      "flow_distribution": {
+        "feature": 0.4054, "defect": 0.2432, "debt": 0.1081,
+        "risk": 0.027, "subtask": 0.1892, "other": 0.027,
+        "denominator": 37
+      },
+      "defect_ratio": 0.2432
+    },
+    "control": {
+      "throughput": 53,
+      "cycle_time_hours": { "p50": 44.0, "p75": 110.0, "p90": 200.0, "n": 53 },
+      "rework_rate": 0.33,
+      "flow_distribution": {
+        "feature": 0.4923, "defect": 0.1692, "debt": 0.1077,
+        "risk": 0.0308, "subtask": 0.1692, "other": 0.0308,
+        "denominator": 65
+      },
+      "defect_ratio": 0.1692
+    }
   },
   "per_team": [
     { "team": "Bar",  "aggregates": { } },
@@ -510,16 +535,16 @@ Per-issue field-presence rules for non-delivered rows:
 - The three boolean flags `delivered_in_window`, `cancelled_in_window`,
   `wip_at_to` are always present on every row.
 
-**Downstream consumers (especially `ai-adoption-cohort`) MUST filter on
-`delivered_in_window: true` before computing delivery-based metrics
-(cycle, lead, rework, flow_efficiency, throughput).** A naive `mean`
-over the JSONL would incorrectly include `null` rows or zero-rework
-rows. This filter is the documented contract; the skill does not enforce
-it on consumers.
+**Downstream consumers (notably any re-aggregation of `--per-issue`
+output) MUST filter on `delivered_in_window: true` before computing
+delivery-based metrics (cycle, lead, rework, flow_efficiency,
+throughput).** A naive `mean` over the JSONL would incorrectly
+include `null` rows or zero-rework rows. This filter is the
+documented contract; the skill does not enforce it on consumers.
 
-This is the contract that the downstream `ai-adoption-baseline` and
-`ai-adoption-cohort` skills consume. Each row carries enough fields for
-those skills to re-derive every aggregate without re-querying Jira.
+This is the contract that the downstream `ai-adoption-report` skill
+(and any future per-issue inspection tool) consumes. Each row carries
+enough fields to re-derive every aggregate without re-querying Jira.
 
 Per-issue rows are also canonicalized: object keys sorted codepoint
 order, floats rounded to 4 decimals at serialization. JSONL line order:
@@ -1304,9 +1329,10 @@ Explicit anti-scope — the skill **will not**:
 - Compute Deployment Frequency, Failed Deployment Recovery Time, or
   Change Failure Rate proper. Those need deploy data not in the tracker.
 - Pull data from git, PRs, CI, or any non-tracker source.
-- Snapshot baselines (that's `ai-adoption-baseline`).
-- Compare cohort vs baseline (that's `ai-adoption-cohort`).
-- Generate Markdown reports or charts (that's `ai-value-report`).
+- Pair JSON outputs across windows, scopes, or cohorts and render
+  deltas — that's `ai-adoption-report` (baseline / cohort / program
+  modes).
+- Generate Markdown reports or charts — also `ai-adoption-report`.
 - Make claims about *causes* of metric movement. The output is
   descriptive; interpretation is downstream.
 - Run SPACE or DevEx surveys, store survey data, or join with HRIS data.
@@ -1336,7 +1362,7 @@ Contract tests above.
    is descriptive; an unknown issuetype shouldn't block a report.
 5. **One scope per invocation.** No multi-project queries in v1.
    Aggregate via a wrapper script that calls `flow-metrics` N times.
-6. **No Markdown output.** Downstream `ai-value-report` owns
+6. **No Markdown output.** Downstream `ai-adoption-report` owns
    presentation.
 7. **No change-failure-rate proxy.** The skill emits `defect_ratio` and
    `rework_rate` and explicitly notes in output that these are *not*

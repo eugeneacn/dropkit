@@ -992,9 +992,10 @@ contract metric.
 ## Rollout
 
 New skill, no existing behavior changed. Ships as `v0.1.0` under
-`skills/workflows/flow-metrics/`. The three downstream AI-adoption skills
-(`ai-adoption-baseline`, `ai-adoption-cohort`, `ai-value-report`) are
-separate PRs that depend on flow-metrics v0.1.0 being installable.
+`skills/workflows/flow-metrics/`. The downstream `ai-adoption-report`
+skill (baseline / cohort / program modes — see
+[`docs/specs/ai-adoption-report.md`](ai-adoption-report.md)) is a
+separate PR that depends on flow-metrics v0.1.0 being installable.
 
 Ship checklist before tagging:
 
@@ -1044,3 +1045,8 @@ Ship checklist before tagging:
 ## Changelog
 
 - 2026-05-19: initial plan
+- 2026-05-19: update downstream-skill reference — the three original
+  AI-adoption specs (baseline, cohort, value-report) were consolidated
+  into a single `ai-adoption-report` skill (three modes). No
+  flow-metrics technical contract changes; rollout updated to point
+  at the new spec.
