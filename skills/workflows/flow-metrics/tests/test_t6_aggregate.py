@@ -17,8 +17,9 @@ from flow_metrics.aggregate import (
     FLOW_DISTRIBUTION_BUCKETS,
     aggregate,
 )
-from flow_metrics.config import load_state_config
-from flow_metrics.per_issue import PerIssueRow
+from flow_metrics.changelog import ChangelogEntry
+from flow_metrics.config import load_issuetype_config, load_state_config
+from flow_metrics.per_issue import PerIssueRow, derive_row
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +39,30 @@ def _window(from_str: str, to_str: str) -> Window:
 
 WINDOW = _window("2026-04-01", "2026-04-30")
 STATE = load_state_config()
+ITYPE = load_issuetype_config()
+
+
+def _changelog_entry(ts: datetime, frm: str, to: str) -> ChangelogEntry:
+    return ChangelogEntry(
+        timestamp=ts, author="alice", field="status", from_value=frm, to_value=to,
+    )
+
+
+def _jira_issue(
+    key: str,
+    *,
+    created: datetime,
+    status_name: str,
+    issuetype_name: str = "Story",
+) -> dict:
+    return {
+        "key": key,
+        "fields": {
+            "created": created.strftime("%Y-%m-%dT%H:%M:%S.000+0000"),
+            "status": {"name": status_name},
+            "issuetype": {"name": issuetype_name},
+        },
+    }
 
 
 def _row(
@@ -508,6 +533,48 @@ class TestEdges:
         block = aggregate(iter(rows), WINDOW, STATE)
         total = sum(block.flow_distribution[b] for b in FLOW_DISTRIBUTION_BUCKETS)
         assert abs(total - 1.0) <= 1e-4
+
+    def test_integration_t5_rows_feed_t6_correctly(self) -> None:
+        # End-to-end: build PerIssueRows via T5's derive_row from a small
+        # synthetic Jira issue + changelog, feed them through aggregate.
+        # Catches contract drift between T5's output schema and T6's
+        # consumption (notably the wip_samples plumbing and the last-
+        # sample-equals-wip_at_to invariant).
+        window = _window("2026-04-01", "2026-04-30")
+
+        delivered_issue = _jira_issue(
+            "A", created=_ts(2026, 4, 1), status_name="Done", issuetype_name="Story",
+        )
+        delivered_cl = [
+            _changelog_entry(_ts(2026, 4, 5), "Backlog", "In Progress"),
+            _changelog_entry(_ts(2026, 4, 10), "In Progress", "Done"),
+        ]
+
+        wip_issue = _jira_issue(
+            "B",
+            created=_ts(2026, 4, 1),
+            status_name="In Progress",
+            issuetype_name="Story",
+        )
+        wip_cl = [_changelog_entry(_ts(2026, 4, 15), "Backlog", "In Progress")]
+
+        rows = [
+            derive_row(delivered_issue, delivered_cl, STATE, ITYPE, window),
+            derive_row(wip_issue, wip_cl, STATE, ITYPE, window),
+        ]
+        # The last wip_sample of any non-delivered, currently-active row
+        # must equal its wip_at_to bool — the spec's "flow_load's last
+        # sample is identically the WIP value" invariant.
+        for r in rows:
+            assert r.wip_samples[-1] == r.wip_at_to
+
+        block = aggregate(iter(rows), window, STATE)
+        assert block.throughput == 1
+        assert block.wip == 1
+        # 30 days in window; B is active from Apr 15 onward → 16 True
+        # samples (Apr 15..Apr 30 inclusive). flow_load == 16/30.
+        assert block.flow_load == round(16 / 30, 4)
+        assert block.flow_load_sample_count == 30
 
     def test_lead_time_includes_skipped_commitment_rows(self) -> None:
         # Spec: Lead Time includes delivered issues that skipped
