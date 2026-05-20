@@ -107,7 +107,10 @@ class Report:
     metrics_requested: List[str] = field(default_factory=lambda: list(CANONICAL_METRICS_ORDER))
     cohort_breakdown: Optional[Mapping[str, AggregateBlock]] = None
     per_team: List[Any] = field(default_factory=list)  # list[PerTeamRow]
-    per_issue: Optional[Iterator[PerIssueRow]] = None
+    # Note: per-issue rows are not carried on Report — :func:`render_jsonl`
+    # takes its own ``Iterable[PerIssueRow]`` directly so the streaming
+    # path is independent of the aggregate Report (no risk of holding the
+    # full iterator alive on the Report dataclass).
 
 
 # ---------------------------------------------------------------------------
@@ -163,10 +166,22 @@ def _aggregates_to_dict(
 def _sort_metrics_requested(metrics: Iterable[str]) -> List[str]:
     """Sort by canonical ``--metrics`` enumeration order, not lex.
 
-    Unknown metric names sort to the end (preserves the canonical-known
-    portion at the front, exposes the unknown for debugging).
+    Also dedupes (a metric appearing twice in the input list emits once
+    in ``meta.metrics_requested``) and silently drops unknown names so
+    the published meta block stays consistent with what ``aggregates``
+    actually carries — ``_aggregates_to_dict`` does not emit unknown
+    metrics, so listing them in ``meta.metrics_requested`` would lie to
+    downstream consumers. CLI flag validation (T1) catches unknown
+    names before they reach the renderer; this is the last-line
+    defence.
     """
-    return sorted(metrics, key=lambda m: (_METRIC_INDEX.get(m, len(_METRIC_INDEX)), m))
+    seen: set = set()
+    canonical: List[str] = []
+    for m in metrics:
+        if m in _METRIC_INDEX and m not in seen:
+            seen.add(m)
+            canonical.append(m)
+    return sorted(canonical, key=lambda m: _METRIC_INDEX[m])
 
 
 def _meta_to_dict(
@@ -193,6 +208,12 @@ def _meta_to_dict(
     for k, v in meta.items():
         if k == "metrics_requested":
             continue  # Report-level field wins
+        if k == "cohort_jql" and (v is None or (isinstance(v, str) and v == "")):
+            # Spec § "Cohort behaviour": key is **absent** when --cohort-jql
+            # was not provided — not null, not "". A generic meta builder
+            # that always sets the field (with None when unused) would
+            # otherwise leak `"cohort_jql":null` past the contract test.
+            continue
         if k == "sources" and isinstance(v, (list, tuple)):
             out[k] = sorted(v)
             continue
@@ -217,14 +238,26 @@ def _build_report_dict(report: Report) -> Dict[str, Any]:
         "aggregates": _aggregates_to_dict(report.aggregate, report.metrics_requested),
         "notes": sorted(report.notes),
     }
-    if report.cohort_breakdown is not None:
-        cb: Dict[str, Any] = {}
-        for side in ("cohort", "control"):
-            if side in report.cohort_breakdown:
-                cb[side] = _aggregates_to_dict(
+    if report.cohort_breakdown:
+        # Truthy check — an empty dict slips past `is not None` and would
+        # emit `"cohort_breakdown":{}`, violating the spec's "omit when
+        # --cohort-jql absent" rule for any caller that defaults the
+        # field to an empty dict instead of None.
+        #
+        # Spec lines 406-428: cohort_breakdown emits both `cohort` and
+        # `control` sides together — the example always shows both, and
+        # T8's :func:`build_cohort_breakdown` always returns both. A
+        # partial breakdown (one side only) is upstream contract
+        # violation; rather than silently produce spec-undefined output,
+        # require both-or-neither and skip emission when one is missing.
+        sides_present = [s for s in ("cohort", "control") if s in report.cohort_breakdown]
+        if set(sides_present) == {"cohort", "control"}:
+            out["cohort_breakdown"] = {
+                side: _aggregates_to_dict(
                     report.cohort_breakdown[side], report.metrics_requested
                 )
-        out["cohort_breakdown"] = cb
+                for side in ("cohort", "control")
+            }
     if report.per_team:
         out["per_team"] = [
             {
@@ -312,7 +345,9 @@ def _serialize(obj: Any) -> bytes:
         for k in keys:
             parts2.append(_json_str(k) + b":" + _serialize(obj[k]))
         return b"{" + b",".join(parts2) + b"}"
-    if isinstance(obj, (list, tuple)):
+    if isinstance(obj, list):
+        # ``_round_floats`` normalises tuples → lists in the pre-walk, so
+        # the serializer only ever sees lists for sequence-like values.
         item_parts = [_serialize(v) for v in obj]
         return b"[" + b",".join(item_parts) + b"]"
     if isinstance(obj, int):
@@ -382,8 +417,15 @@ def _per_issue_row_to_dict(row: PerIssueRow) -> Dict[str, Any]:
     issue mode" lists every emitted field; ``wip_samples`` is not among
     them). Every other field is emitted; nullable fields emit JSON
     ``null`` for ``None``.
+
+    ``cohort`` is **only** emitted when set (``True`` / ``False``). When
+    ``--cohort-jql`` is not in play, T8's :func:`tag_cohort` doesn't run
+    and ``row.cohort`` stays ``None``; emitting ``"cohort": null`` would
+    mislead consumers into thinking the row was tagged as not-in-cohort.
+    Spec § "Cohort behaviour" line 1124 binds cohort-field presence to
+    cohort-jql mode; absence is the documented signal for "no cohort".
     """
-    return {
+    out: Dict[str, Any] = {
         "key": row.key,
         "issue_created": row.issue_created,
         "first_commitment_at": row.first_commitment_at,
@@ -399,8 +441,10 @@ def _per_issue_row_to_dict(row: PerIssueRow) -> Dict[str, Any]:
         "delivered_in_window": row.delivered_in_window,
         "cancelled_in_window": row.cancelled_in_window,
         "wip_at_to": row.wip_at_to,
-        "cohort": row.cohort,
     }
+    if row.cohort is not None:
+        out["cohort"] = row.cohort
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -431,20 +475,22 @@ def _format_scope(scope: Any) -> str:
 
 
 def _csv_cell_float(value: Any) -> str:
-    """CSV cell for a maybe-float maybe-None metric value.
+    """CSV cell for a maybe-float maybe-None maybe-int metric value.
 
-    ``None`` -> blank string. Floats are rounded to 4 dp (CSV honours the
-    same precision contract as JSON — same source data, same wire
-    invariants). Ints pass through as the int repr.
+    ``None`` -> blank string (used for percentiles with ``n < 2`` and for
+    blank ``p75 / p90`` columns on scalar-metric rows). Floats are
+    rounded to 4 dp and rendered via ``json.dumps`` — same precision
+    contract as the JSON / JSONL siblings, so ``38.2`` not
+    ``38.20000000000001`` and ``120.0`` not ``120``. Ints pass through
+    as the int repr.
+
+    Bools are not expected (aggregate metrics are numeric / nullable),
+    so no special arm: ``bool`` would hit the ``int`` branch and emit
+    ``1`` / ``0``, which is fine if it ever happens.
     """
     if value is None:
         return ""
-    if isinstance(value, bool):
-        return "1" if value else "0"
     if isinstance(value, float):
-        # json.dumps emits the shortest representation consistent with
-        # the value — same rule as the JSON / JSONL siblings — so
-        # ``38.2`` not ``38.20000000000001`` and ``120.0`` not ``120``.
         return json.dumps(round(value, 4))
     if isinstance(value, int):
         return str(value)
@@ -548,12 +594,15 @@ def render_csv(report: Report) -> bytes:
 
     rows: List[List[str]] = []
     _emit_aggregate_rows(rows, scope_str, "all", "", report.aggregate, metrics)
-    if report.cohort_breakdown is not None:
+    # Mirror the JSON-side contract: only emit cohort / control rows
+    # when both sides are present (spec lines 406-428). Partial
+    # breakdowns are upstream contract violations and are silently
+    # skipped, same as on the JSON path.
+    if report.cohort_breakdown and {"cohort", "control"}.issubset(report.cohort_breakdown):
         for side in ("cohort", "control"):
-            if side in report.cohort_breakdown:
-                _emit_aggregate_rows(
-                    rows, scope_str, side, "", report.cohort_breakdown[side], metrics
-                )
+            _emit_aggregate_rows(
+                rows, scope_str, side, "", report.cohort_breakdown[side], metrics
+            )
     for pt in report.per_team:
         _emit_aggregate_rows(
             rows, scope_str, "all", pt.team, pt.aggregates, metrics

@@ -103,7 +103,6 @@ def _make_report(**overrides: Any) -> Report:
         "metrics_requested": list(CANONICAL_METRICS_ORDER),
         "cohort_breakdown": None,
         "per_team": [],
-        "per_issue": None,
     }
     defaults.update(overrides)
     return Report(**defaults)
@@ -126,11 +125,19 @@ class TestContract:
         assert a == b
 
     def test_per_team_sort_uses_codepoint_order(self) -> None:
-        # T10 emits per_team in input order; T9's per_team_rollup is the
-        # one that sorts codepoint. Here we feed pre-sorted rows and assert
-        # the serializer preserves that order verbatim (no re-sort that
-        # could mask a T9 regression).
-        # Codepoint order: uppercase < lowercase, ASCII < Latin-1.
+        # The contract T10 owns is "do not re-sort per_team — preserve
+        # caller order verbatim". T9's per_team_rollup is responsible
+        # for sorting codepoint; T10's job is not to undo that.
+        #
+        # The fixture feeds names in codepoint order
+        # (``Z`` < ``a`` < ``Ü`` by codepoint: 0x5A < 0x61 < 0xDC).
+        # That same list is NOT in Python's default lex order — if T10
+        # called `sorted()` (which uses codepoint) the output would
+        # become ``["Zebra", "alpha", "Über-team"]``, catching the
+        # regression. The test verifies preservation, which is what
+        # T10 owns; the "codepoint" guarantee belongs to T9 and is
+        # locked there by ``test_per_team_sort_uses_codepoint_order``
+        # in tests/test_t9_align_per_team.py.
         names = ["Zebra", "Über-team", "alpha"]
         rows = [PerTeamRow(team=n, aggregates=_make_block(throughput=1)) for n in names]
         report = _make_report(per_team=rows)
@@ -164,12 +171,34 @@ class TestContract:
             assert keys == sorted(keys)
 
     def test_csv_long_form_columns(self) -> None:
-        report = _make_report()
+        # Verify both the header AND the (metric, scope, cohort, team)
+        # tuple semantics on at least one data row. A test that only
+        # checks the header would pass against an impl that emitted
+        # rows in the wrong column order.
+        report = _make_report(
+            metrics_requested=["throughput", "cycle_time"],
+            per_team=[PerTeamRow(team="Foo", aggregates=_make_block(throughput=42))],
+        )
         csv_bytes = render_csv(report)
         text = csv_bytes.decode("utf-8")
-        header = text.splitlines()[0]
-        # Columns in exact spec order.
-        assert header.split(",") == list(CSV_HEADER)
+        lines = text.splitlines()
+        assert lines[0].split(",") == list(CSV_HEADER)
+        # Find the row for global throughput.
+        rows = [line.split(",") for line in lines[1:]]
+        global_throughput = next(
+            r for r in rows if r[0] == "throughput" and r[3] == ""
+        )
+        # metric, scope, cohort, team
+        assert global_throughput[0] == "throughput"
+        assert global_throughput[1] == "PROJ/Foo"  # scope from meta
+        assert global_throughput[2] == "all"
+        assert global_throughput[3] == ""
+        # cycle_time is percentile-bearing — p50/p75/p90/count all filled.
+        global_cycle = next(r for r in rows if r[0] == "cycle_time" and r[3] == "")
+        assert global_cycle[4] != ""  # p50
+        assert global_cycle[5] != ""  # p75
+        assert global_cycle[6] != ""  # p90
+        assert global_cycle[7] != ""  # count
 
     def test_metrics_filter_omits_unrequested(self) -> None:
         # --metrics throughput,wip -> aggregates has ONLY those two keys.
@@ -198,15 +227,16 @@ class TestContract:
 class TestConstruction:
     def test_json_keys_sorted_at_every_level_except_bucket_maps(self) -> None:
         # Recursive descent: every dict's keys are codepoint-sorted,
-        # except flow_distribution (bucket-order).
+        # except flow_distribution (bucket-order). Positively asserts
+        # both halves — sort everywhere except the four bucket paths,
+        # AND canonical bucket order at all four bucket paths (including
+        # the per-team copy, which the path-pattern alone wouldn't catch
+        # if a future refactor sorted lex by accident).
         report = _make_report(
             cohort_breakdown={"cohort": _make_block(), "control": _make_block()},
             per_team=[PerTeamRow(team="Foo", aggregates=_make_block())],
         )
         out_bytes = render_json(report)
-        # Walk the byte string at "key": positions and verify ordering
-        # by parsing the JSON and re-walking the parsed structure with
-        # an iter-keys check at each dict node.
         out = json.loads(out_bytes.decode("utf-8"))
 
         bucket_paths = {
@@ -217,9 +247,6 @@ class TestConstruction:
 
         def _walk(node: Any, path: Tuple[str, ...]) -> None:
             if isinstance(node, dict):
-                # Re-parse the on-wire bytes for ordering — json.loads
-                # preserves insertion order in py>=3.7, so this works.
-                # Skip bucket-order maps.
                 is_bucket = path in bucket_paths or (
                     len(path) >= 3
                     and path[0] == "per_team"
@@ -234,30 +261,61 @@ class TestConstruction:
                 for k, v in node.items():
                     _walk(v, path + (k,))
             elif isinstance(node, list):
-                for i, v in enumerate(node):
-                    # For per_team list, treat each row by tagging the
-                    # path with the field name (no index).
+                for v in node:
                     _walk(v, path)
 
         _walk(out, ())
 
+        # Positive bucket-order assertions at every bucket-map path,
+        # including the per-team copy. If the bucket-order exception is
+        # ever removed, these fail before the walk's negative coverage
+        # would (since lex-sorted keys ALSO pass `keys == sorted(keys)`).
+        expected = list(BUCKET_ORDER)
+        assert list(out["aggregates"]["flow_distribution"].keys()) == expected
+        assert (
+            list(out["cohort_breakdown"]["cohort"]["flow_distribution"].keys())
+            == expected
+        )
+        assert (
+            list(out["cohort_breakdown"]["control"]["flow_distribution"].keys())
+            == expected
+        )
+        assert (
+            list(out["per_team"][0]["aggregates"]["flow_distribution"].keys())
+            == expected
+        )
+
     def test_floats_rounded_to_4dp(self) -> None:
-        # Every float in the serialised output matches the regex —
-        # implicitly verifies both rounding (no 0.46075000000001
-        # artifacts) and no scientific notation.
-        report = _make_report()
+        # Inject a value that visibly NEEDS rounding (5+ decimal digits)
+        # so the test fails if the pre-walk is removed — a fixture that
+        # uses values which already serialise ≤4 dp would let a bug
+        # through. ``round(21.40005, 4)`` lands on ``21.4001`` under
+        # Python's banker's rounding tie-breaks; the assertion below
+        # tolerates either round-half-up or round-half-even by demanding
+        # only "no 5+ dp ever appears on the wire".
+        report = _make_report(
+            aggregate=_make_block(
+                flow_load=21.40005,
+                rework_rate=0.123456789,
+                flow_eff_p50=0.6543219876,
+            )
+        )
         out = render_json(report)
         text = out.decode("utf-8")
-        # Pull every number-like literal from the output.
-        # Avoid matching numbers inside strings (dates, sha hex) by
-        # scanning for `": <number>` and `, <number>` and `[ <number>`
-        # patterns.
+        # Pull every numeric literal preceded by `:`, `,`, or `[`.
         pattern = re.compile(r"[:,\[]\s*(-?\d+(?:\.\d+)?)\b(?!\")")
         regex = re.compile(r"^-?\d+(\.\d{1,4})?$")
         floats_found = [
             m.group(1) for m in pattern.finditer(text) if "." in m.group(1)
         ]
-        assert floats_found, "no floats present in output — fixture mis-built"
+        # Sanity: the fixture's needs-rounding values landed in the output.
+        assert any(v.startswith("21.4") for v in floats_found), (
+            "fixture's flow_load value missing from output"
+        )
+        # The unrounded source `0.123456789` must not survive verbatim.
+        assert "0.123456789" not in text
+        assert "0.6543219876" not in text
+        # No float has more than 4 decimal digits.
         for v in floats_found:
             assert regex.match(v), "float {!r} fails 4-dp regex".format(v)
 
@@ -347,12 +405,78 @@ class TestExtra:
         out = _decode(render_json(report))
         assert out["meta"]["cohort_jql"] == "labels = ai-assisted"
 
+    def test_meta_cohort_jql_dropped_when_none_or_empty(self) -> None:
+        # Spec § "Cohort behaviour" line 1128-1131: key must be **absent**
+        # — not null, not "". A generic meta builder that always sets the
+        # field (with None when --cohort-jql is unused) must not leak
+        # ``"cohort_jql":null`` past the renderer.
+        for value in (None, ""):
+            report = _make_report(meta=_make_meta(cohort_jql=value))
+            out = _decode(render_json(report))
+            assert "cohort_jql" not in out["meta"], (
+                "cohort_jql={!r} should be dropped, not emitted".format(value)
+            )
+
     def test_cohort_breakdown_emitted_when_provided(self) -> None:
         report = _make_report(
             cohort_breakdown={"cohort": _make_block(), "control": _make_block()}
         )
         out = _decode(render_json(report))
         assert set(out["cohort_breakdown"].keys()) == {"cohort", "control"}
+
+    def test_cohort_breakdown_omitted_when_empty(self) -> None:
+        # An empty dict (caller passes ``cohort_breakdown={}`` instead of
+        # ``None``) must not emit ``"cohort_breakdown":{}`` — spec says
+        # the block is absent when --cohort-jql wasn't provided, and an
+        # empty dict is the same contract violation as None being misread.
+        report = _make_report(cohort_breakdown={})
+        out = _decode(render_json(report))
+        assert "cohort_breakdown" not in out
+
+    def test_cohort_breakdown_omitted_when_partial(self) -> None:
+        # Spec lines 406-428: both `cohort` and `control` always appear
+        # together. Receiving only one side is upstream contract
+        # violation; the renderer silently skips rather than producing
+        # spec-undefined partial output. Same rule applies to CSV.
+        only_cohort = _make_report(cohort_breakdown={"cohort": _make_block()})
+        out = _decode(render_json(only_cohort))
+        assert "cohort_breakdown" not in out
+        only_control = _make_report(cohort_breakdown={"control": _make_block()})
+        out2 = _decode(render_json(only_control))
+        assert "cohort_breakdown" not in out2
+
+    def test_csv_cohort_breakdown_rows_emitted(self) -> None:
+        # Mirrors the JSON-side cohort_breakdown contract on the CSV
+        # surface. Both sides present → CSV gets one row per metric per
+        # side, with the `cohort` column set to "cohort" / "control".
+        report = _make_report(
+            metrics_requested=["throughput"],
+            cohort_breakdown={
+                "cohort": _make_block(throughput=31),
+                "control": _make_block(throughput=53),
+            },
+        )
+        text = render_csv(report).decode("utf-8")
+        lines = text.splitlines()
+        rows = [line.split(",") for line in lines[1:]]
+        # global + cohort + control = 3 throughput rows.
+        throughput_rows = [r for r in rows if r[0] == "throughput"]
+        assert len(throughput_rows) == 3
+        cohort_labels = {r[2] for r in throughput_rows}
+        assert cohort_labels == {"all", "cohort", "control"}
+
+    def test_csv_cohort_breakdown_omitted_when_partial(self) -> None:
+        # CSV's partial-cohort rule mirrors the JSON side.
+        report = _make_report(
+            metrics_requested=["throughput"],
+            cohort_breakdown={"cohort": _make_block(throughput=31)},
+        )
+        text = render_csv(report).decode("utf-8")
+        lines = text.splitlines()
+        rows = [line.split(",") for line in lines[1:]]
+        # Only the global row remains.
+        cohort_labels = {r[2] for r in rows}
+        assert cohort_labels == {"all"}
 
     def test_per_issue_jsonl_keys_sorted_codepoint(self) -> None:
         row = _make_per_issue_row(key="PROJ-99")
@@ -415,6 +539,174 @@ class TestExtra:
         report = _make_report(meta=_make_meta(per_team_double_counted=True))
         out = _decode(render_json(report))
         assert out["meta"]["per_team_double_counted"] is True
+
+    def test_meta_passthrough_preserves_required_fields(self) -> None:
+        # The whole meta block lives at the seam between T11 (builder) and
+        # T10 (renderer). A regex bug in _meta_to_dict could silently drop
+        # fields like schema_version or state_config_sha; this test pins
+        # the spec-example shape.
+        report = _make_report()
+        out = _decode(render_json(report))
+        meta = out["meta"]
+        assert meta["schema_version"] == "1.0"
+        assert meta["state_config_sha"] == "abc"
+        assert meta["issuetype_config_sha"] == "def"
+        assert meta["caller"] == "5b10ac8d82e05b22cc7d4ef5"
+        assert meta["scope"] == {"project": "PROJ", "team": "Foo"}
+        assert meta["window"] == {"from": "2026-02-19", "to": "2026-05-19"}
+
+    def test_report_metrics_requested_wins_over_meta(self) -> None:
+        # `meta.metrics_requested` is overridden by the Report-level
+        # field. Locks in the single-source-of-truth contract so a future
+        # refactor that flipped the precedence would surface immediately.
+        report = _make_report(
+            metrics_requested=["wip"],
+            meta=_make_meta(metrics_requested=["throughput", "cycle_time"]),
+        )
+        out = _decode(render_json(report))
+        assert out["meta"]["metrics_requested"] == ["wip"]
+        # And the aggregates dict reflects the Report-level list — not meta.
+        assert set(out["aggregates"].keys()) == {"wip"}
+
+    def test_meta_metrics_requested_dedupes_and_drops_unknown(self) -> None:
+        # Two safety nets: a metric repeated in the caller's list emits
+        # once on the wire, and an unknown metric (e.g. typo'd CLI flag
+        # that bypassed validation) is dropped from meta rather than
+        # advertised as published. Otherwise meta would lie:
+        # `metrics_requested` would list a metric `aggregates` doesn't
+        # carry.
+        report = _make_report(
+            metrics_requested=["wip", "wip", "throughput", "made_up_metric"]
+        )
+        out = _decode(render_json(report))
+        assert out["meta"]["metrics_requested"] == ["throughput", "wip"]
+        assert set(out["aggregates"].keys()) == {"throughput", "wip"}
+
+    def test_csv_flow_distribution_rows_have_six_buckets(self) -> None:
+        # flow_distribution explodes into one row per bucket in the
+        # canonical (feature, defect, debt, risk, subtask, other) order,
+        # with the distribution denominator in the ``count`` column and
+        # p75 / p90 blank. The underlying long-form (metric, scope,
+        # cohort, team) contract is preserved per row.
+        report = _make_report(metrics_requested=["flow_distribution"])
+        text = render_csv(report).decode("utf-8")
+        lines = text.splitlines()
+        assert lines[0].split(",") == list(CSV_HEADER)
+        bucket_rows = [
+            line.split(",") for line in lines[1:]
+            if line.split(",")[0].startswith("flow_distribution.")
+        ]
+        # Exactly six bucket rows (one per canonical bucket).
+        assert len(bucket_rows) == 6
+        names = [r[0] for r in bucket_rows]
+        assert names == [
+            "flow_distribution.feature",
+            "flow_distribution.defect",
+            "flow_distribution.debt",
+            "flow_distribution.risk",
+            "flow_distribution.subtask",
+            "flow_distribution.other",
+        ]
+        # Each bucket row: p75 / p90 blank, count = denominator (102).
+        for r in bucket_rows:
+            assert r[5] == ""  # p75 blank
+            assert r[6] == ""  # p90 blank
+            assert r[7] == "102"
+
+    def test_per_issue_jsonl_omits_cohort_when_none(self) -> None:
+        # `--per-issue` without `--cohort-jql` leaves `row.cohort` as
+        # None (T8's tag_cohort never ran). Emitting `"cohort":null`
+        # would mislead downstream consumers — spec § "Cohort behaviour"
+        # binds cohort-field presence to cohort-jql mode. Absence is the
+        # documented signal for "no cohort".
+        row = _make_per_issue_row(key="PROJ-NO-COHORT", cohort=None)
+        line = next(render_jsonl(iter([row])))
+        text = line.decode("utf-8")
+        assert "cohort" not in text or '"cohort":' not in text
+        # Sanity: the rest of the row is still present.
+        assert '"key":"PROJ-NO-COHORT"' in text
+
+    def test_per_issue_jsonl_emits_cohort_when_tagged(self) -> None:
+        # The flip side of the previous test: when cohort is True/False
+        # the field IS emitted with the boolean. Pins both halves.
+        row_true = _make_per_issue_row(key="A", cohort=True)
+        row_false = _make_per_issue_row(key="B", cohort=False)
+        text_t = next(render_jsonl(iter([row_true]))).decode("utf-8")
+        text_f = next(render_jsonl(iter([row_false]))).decode("utf-8")
+        assert '"cohort":true' in text_t
+        assert '"cohort":false' in text_f
+
+    def test_per_issue_jsonl_cohort_omission_across_row_classes(self) -> None:
+        # Cohort=None omission applies regardless of row classification —
+        # delivered, cancelled, and wip-only paths all behave the same.
+        # Locks the field-agnostic single-`is not None` check at one
+        # place in the impl.
+        delivered = _make_per_issue_row(key="D", cohort=None)
+        cancelled = _make_per_issue_row(
+            key="C",
+            cohort=None,
+            delivered_in_window=False,
+            cancelled_in_window=True,
+            cycle_eligible=False,
+            cycle_time_hours=None,
+            lead_time_hours=None,
+            flow_efficiency=None,
+            first_commitment_at=None,
+            first_delivery_at=None,
+            issuetype_at_delivery=None,
+            issuetype_bucket=None,
+        )
+        wip_only = _make_per_issue_row(
+            key="W",
+            cohort=None,
+            delivered_in_window=False,
+            wip_at_to=True,
+            cycle_eligible=False,
+            cycle_time_hours=None,
+            lead_time_hours=None,
+            flow_efficiency=None,
+            first_commitment_at=None,
+            first_delivery_at=None,
+            issuetype_at_delivery=None,
+            issuetype_bucket=None,
+        )
+        for row in (delivered, cancelled, wip_only):
+            line = next(render_jsonl(iter([row])))
+            text = line.decode("utf-8")
+            assert '"cohort":' not in text, (
+                "cohort=None should be omitted for row {!r}; got: {}".format(
+                    row.key, text
+                )
+            )
+
+    def test_render_jsonl_never_emits_cohort_breakdown(self) -> None:
+        # Spec line 1124-1127 (test_per_issue_omits_cohort_breakdown):
+        # per-issue mode has no aggregate object, and `cohort_breakdown`
+        # must NOT appear in any per-issue output. Negative coverage on
+        # the renderer surface.
+        rows = [_make_per_issue_row(key="A"), _make_per_issue_row(key="B")]
+        for line in render_jsonl(iter(rows)):
+            text = line.decode("utf-8")
+            assert "cohort_breakdown" not in text
+
+    def test_render_json_emits_empty_notes_array(self) -> None:
+        # Spec example always shows a `notes` array, even when no notes
+        # have been collected. Locks the "always emit, even if empty"
+        # behaviour so a future refactor that drops empty notes doesn't
+        # silently break downstream consumers that index `notes[0]` or
+        # similar.
+        report = _make_report(notes=[])
+        out = _decode(render_json(report))
+        assert out["notes"] == []
+
+    def test_render_json_with_empty_meta(self) -> None:
+        # Defensive: a caller passing `meta={}` (e.g. early-pipeline
+        # smoke test) still produces a valid Report. The renderer
+        # injects `metrics_requested` from the Report-level field, so
+        # the output has at least that one meta key.
+        report = _make_report(meta={})
+        out = _decode(render_json(report))
+        assert out["meta"]["metrics_requested"] == list(CANONICAL_METRICS_ORDER)
 
     def test_csv_per_team_rows_have_team_label(self) -> None:
         report = _make_report(
@@ -486,97 +778,10 @@ def _make_per_issue_row(
     )
 
 
-_KEY_RE = re.compile(r'"([^"\\]*)":')
-
-
 def _extract_top_level_keys(text: str) -> List[str]:
     """Pull top-level keys out of a single-line JSON object string.
 
-    Walks bracket depth to avoid descending into nested objects/arrays.
-    The renderer's output is single-line JSON, so a simple scan suffices.
+    Relies on ``json.loads`` preserving dict insertion order (py >= 3.7),
+    so the returned list matches the textual on-wire key order.
     """
-    keys: List[str] = []
-    depth = 0
-    i = 0
-    in_string = False
-    escape = False
-    while i < len(text):
-        c = text[i]
-        if escape:
-            escape = False
-            i += 1
-            continue
-        if c == "\\":
-            escape = True
-            i += 1
-            continue
-        if c == '"':
-            in_string = not in_string
-            i += 1
-            continue
-        if in_string:
-            i += 1
-            continue
-        if c == "{":
-            depth += 1
-            if depth == 1:
-                # We just entered the top-level object — scan for keys.
-                pass
-            i += 1
-            continue
-        if c == "}":
-            depth -= 1
-            i += 1
-            continue
-        if c == "[":
-            depth += 1
-            i += 1
-            continue
-        if c == "]":
-            depth -= 1
-            i += 1
-            continue
-        i += 1
-    # Re-scan with a simpler approach: match "<key>": only at depth 1.
-    depth = 0
-    in_string = False
-    escape = False
-    i = 0
-    pending_key: Optional[str] = None
-    while i < len(text):
-        c = text[i]
-        if escape:
-            escape = False
-            i += 1
-            continue
-        if in_string:
-            if c == "\\":
-                escape = True
-            elif c == '"':
-                in_string = False
-                # If we were collecting a key, finalize.
-                if pending_key is not None and depth == 1:
-                    # Look ahead for the colon to confirm this is a key.
-                    j = i + 1
-                    while j < len(text) and text[j] in " \t":
-                        j += 1
-                    if j < len(text) and text[j] == ":":
-                        keys.append(pending_key)
-                    pending_key = None
-            else:
-                if pending_key is not None:
-                    pending_key += c
-            i += 1
-            continue
-        if c == '"':
-            in_string = True
-            if depth == 1:
-                pending_key = ""
-            i += 1
-            continue
-        if c in "{[":
-            depth += 1
-        elif c in "}]":
-            depth -= 1
-        i += 1
-    return keys
+    return list(json.loads(text).keys())
