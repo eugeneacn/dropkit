@@ -1,0 +1,10 @@
+# Lock golden / fixture files to LF on every platform. The byte-equal
+# integration suite compares output bytes against these files verbatim;
+# without this pin, Git's autocrlf would rewrite goldens to CRLF on
+# Windows checkout and every comparison would fail by exactly two
+# bytes per line — even though the implementation (which always emits
+# LF via `sys.stdout.buffer.write(b"\n")` and `csv.writer(lineterminator="\n")`)
+# is unchanged.
+*.json   text eol=lf
+*.jsonl  text eol=lf
+*.csv    text eol=lf

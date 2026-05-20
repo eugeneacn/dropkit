@@ -974,12 +974,21 @@ def test_main_catches_jira_error(monkeypatch):
 def test_main_catches_upstream_not_found(monkeypatch, capsys):
     import flow_metrics
 
+    # Use a tmp_path-style absolute Path so str(p) is well-defined on
+    # every platform. The original hardcoded "/no/such" stringified as
+    # "\\no\\such" on Windows (PosixPath vs WindowsPath), which broke
+    # the cross-platform CI matrix once T13 added Windows runners. We
+    # assert the rendered str(path) substring rather than the POSIX
+    # literal.
+    fake_path = Path("/no/such")
+    expected_in_msg = str(fake_path)
+
     def boom(*a, **kw):
-        raise UpstreamNotFoundError("jira", [Path("/no/such")])
+        raise UpstreamNotFoundError("jira", [fake_path])
 
     monkeypatch.setattr(flow_metrics, "validate_args", boom)
     rc = flow_metrics.main(["--project", "P"])
     assert rc == 2
     captured = capsys.readouterr()
     assert "jira" in captured.err
-    assert "/no/such" in captured.err
+    assert expected_in_msg in captured.err
