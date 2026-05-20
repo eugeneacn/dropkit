@@ -1,0 +1,10 @@
+{
+  "throughput": 12,
+  "cycle_time_p50": 48,
+  "cycle_time_p75": 96,
+  "cycle_time_p90": 139.2,
+  "lead_time_p50": 60,
+  "rework_rate": 0.0833,
+  "cancelled_count": 1,
+  "defect_ratio": 0.3333
+}

@@ -376,7 +376,11 @@ def _build_scope_clause(args: argparse.Namespace, state_config, teams) -> Option
         if args.team:
             tf = state_config.team_field
             if tf is not None and tf.id:
-                clause += ' AND "{}" = "{}"'.format(tf.id, args.team)
+                # Escape backslashes + double-quotes inside the JQL string
+                # literal so a --team value containing either renders as
+                # valid JQL rather than truncating the clause early.
+                team_lit = args.team.replace("\\", "\\\\").replace('"', '\\"')
+                clause += ' AND "{}" = "{}"'.format(tf.id, team_lit)
         return clause
     # program / portfolio
     if not teams:
@@ -700,6 +704,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
             return EXIT_USER_ABORT
 
+    # Locally-imported exception types — keep the catch list explicit so
+    # Python picks the right branch by isinstance, not by clause order.
+    from .timeline import UnmappedStatusError as _UnmappedStatusError
+    from .align import AlignResponseError as _AlignResponseError
+    from .meta import CallerResolutionError as _CallerResolutionError
+
     try:
         return _run_pipeline(args, window)
     except ValidationError as e:
@@ -708,6 +718,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except (AllowlistError, UpstreamNotFoundError) as e:
         # Wrapper-boundary refusals (disallowed verbs, missing upstream
         # skill) are validation-class failures.
+        print("error: {}".format(e), file=sys.stderr)
+        return EXIT_VALIDATION
+    except _UnmappedStatusError as e:
+        # Spec § "Unmapped-status policy": data-dependent exit 2 naming
+        # the offending raw status. The exception message already does so.
         print("error: {}".format(e), file=sys.stderr)
         return EXIT_VALIDATION
     except ValueError as e:
@@ -720,15 +735,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # Upstream stderr was already forwarded inside the wrapper; here
         # we only need to translate to the right exit code.
         return EXIT_UPSTREAM
-    except Exception as e:
-        # Catch-all for upstream-side data shape errors (AlignResponseError,
-        # CallerResolutionError, etc.) — the spec maps these to exit 3.
-        from .align import AlignResponseError
-        from .meta import CallerResolutionError
-        if isinstance(e, (AlignResponseError, CallerResolutionError)):
-            print("error: {}".format(e), file=sys.stderr)
-            return EXIT_UPSTREAM
-        raise
+    except (_AlignResponseError, _CallerResolutionError) as e:
+        # Upstream-side data-shape errors — subprocess exited zero but
+        # the payload was unusable. Spec maps to exit 3.
+        print("error: {}".format(e), file=sys.stderr)
+        return EXIT_UPSTREAM
 
 
 if __name__ == "__main__":

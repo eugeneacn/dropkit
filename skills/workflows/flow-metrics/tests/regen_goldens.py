@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import io
 import os
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,11 +41,16 @@ from flow_metrics import main as cli_main  # noqa: E402
 
 
 _GENERATED_AT_PLACEHOLDER = "__GENERATED_AT__"
-_ISO_TS_RE = re.compile(rb"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})")
+# Match _substitute_generated_at in test_integration.py — scope the
+# substitution to the pinned-clock value so per-issue timestamps survive.
+_PINNED_GENERATED_AT_BYTES = b"2026-05-19T14:00:00Z"
 
 
 def _substitute(payload: bytes) -> bytes:
-    return _ISO_TS_RE.sub(_GENERATED_AT_PLACEHOLDER.encode("ascii"), payload)
+    return payload.replace(
+        _PINNED_GENERATED_AT_BYTES,
+        _GENERATED_AT_PLACEHOLDER.encode("ascii"),
+    )
 
 
 def _setup_sandbox(fixture_dir: Path, *, cohort_marker: Optional[str] = None, tmp_root: Path):

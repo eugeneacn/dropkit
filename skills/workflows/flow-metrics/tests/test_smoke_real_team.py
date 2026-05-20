@@ -153,14 +153,17 @@ def test_smoke_real_team_metrics_within_tolerance(smoke_sandbox):
     lead = agg.get("lead_time_hours") or {}
     _within_tolerance(lead.get("p50"), refs.get("lead_time_p50"), "lead_time.p50")
 
-    # throughput, rework_rate, cancelled count (cancelled is in notes; we
-    # don't expose it on aggregates directly — pull from the in-window
-    # notes line or store a derived counter on the smoke side).
+    # throughput, rework_rate, defect_ratio, cancelled count (cancelled is
+    # in notes; we don't expose it on aggregates directly — pull from the
+    # in-window notes line or store a derived counter on the smoke side).
     _within_tolerance(
         agg.get("throughput"), refs.get("throughput"), "throughput"
     )
     _within_tolerance(
         agg.get("rework_rate"), refs.get("rework_rate"), "rework_rate"
+    )
+    _within_tolerance(
+        agg.get("defect_ratio"), refs.get("defect_ratio"), "defect_ratio"
     )
 
     # Cancelled count surfaces as a notes line; extract via regex.

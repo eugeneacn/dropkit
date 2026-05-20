@@ -45,11 +45,15 @@ def _log_call(verb: str, args: list) -> None:
 
 
 def _emit_text(text: str, output: str) -> None:
+    """Write ``text`` as UTF-8 bytes. See jira_replay._emit_text for why
+    we bypass ``sys.stdout.write`` (Windows cp1252 default).
+    """
+    payload = text.encode("utf-8")
     if output and output != "-":
-        Path(output).write_text(text, encoding="utf-8")
+        Path(output).write_bytes(payload)
     else:
-        sys.stdout.write(text)
-        sys.stdout.flush()
+        sys.stdout.buffer.write(payload)
+        sys.stdout.buffer.flush()
 
 
 def _load_json(path: Path):

@@ -39,7 +39,16 @@ from flow_metrics import main as cli_main
 # Helpers
 # ---------------------------------------------------------------------------
 _GENERATED_AT_PLACEHOLDER = "__GENERATED_AT__"
-_ISO_TS_RE = re.compile(rb"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})")
+
+# The integration_sandbox fixture pins flow_metrics.clock.today_utc() to
+# 2026-05-19T14:00:00 UTC; meta.generated_at renders as the ISO string
+# below (build_meta._iso_generated_at coerces +00:00 to "Z"). We
+# substitute *only* this exact byte string so the golden's per-issue
+# timestamps (issue_created / first_commitment_at / first_delivery_at)
+# remain real timestamps, not the placeholder. A naive
+# "match any ISO timestamp" regex would silently mask regressions
+# where the implementation corrupted those per-issue fields.
+_PINNED_GENERATED_AT_BYTES = b"2026-05-19T14:00:00Z"
 
 
 def _run_cli(argv: list) -> tuple[int, bytes, str]:
@@ -89,24 +98,28 @@ def _run_cli(argv: list) -> tuple[int, bytes, str]:
 
 
 def _substitute_generated_at(payload: bytes) -> bytes:
-    """Replace the rendered ISO timestamp in ``meta.generated_at`` with
-    the literal placeholder. JSON-shape only — CSV / JSONL outputs that
-    embed the same timestamp use the same regex.
+    """Replace the pinned ``meta.generated_at`` timestamp with the literal
+    placeholder. Scoped to that exact byte string so per-issue JSONL
+    timestamps (issue_created, first_commitment_at, first_delivery_at)
+    survive the substitution and stay locked in by the byte-compare.
     """
-    return _ISO_TS_RE.sub(_GENERATED_AT_PLACEHOLDER.encode("ascii"), payload)
+    return payload.replace(
+        _PINNED_GENERATED_AT_BYTES,
+        _GENERATED_AT_PLACEHOLDER.encode("ascii"),
+    )
 
 
 def _load_golden(golden_path: Path) -> bytes:
-    """Load a golden file as bytes. For outputs that should embed a
-    timestamp (JSON / JSONL — anything carrying ``meta.generated_at``),
-    assert the placeholder is present so a regeneration that forgot
-    substitution surfaces immediately rather than silently locking in
-    the current wall-clock value.
+    """Load a golden file as bytes.
 
-    CSV output has no timestamp column, so the check is skipped for ``.csv``.
+    For ``.json`` outputs (which carry ``meta.generated_at``), assert the
+    placeholder is present so a regeneration that forgot substitution
+    surfaces immediately rather than silently locking in the current
+    wall-clock value. CSV and per-issue JSONL outputs have no meta
+    block, so the check doesn't apply.
     """
     raw = golden_path.read_bytes()
-    if golden_path.suffix != ".csv":
+    if golden_path.suffix == ".json":
         assert _GENERATED_AT_PLACEHOLDER.encode("ascii") in raw, (
             "golden {} is missing the {} placeholder — did you regenerate "
             "without substitution? Re-run tests/regen_goldens.py.".format(
@@ -197,7 +210,12 @@ PROJ_ALPHA = Path(__file__).resolve().parent / "fixtures" / "proj_alpha"
 
 def test_full_happy_path_jira_only(integration_sandbox):
     """Project scope, default metrics, default state config — JSON to stdout
-    byte-equals fixtures/proj_alpha/golden.json (after generated_at sub)."""
+    byte-equals fixtures/proj_alpha/golden.json (after generated_at sub).
+
+    Also asserts that ``meta.cohort_jql`` is **absent** (not null, not
+    empty string) when --cohort-jql was not provided — spec § Cohort
+    behaviour pins this and T11 enforces it.
+    """
     integration_sandbox.use_fixture("proj_alpha")
     rc, stdout, stderr = _run_cli([
         "--project", "ALPHA",
@@ -208,10 +226,25 @@ def test_full_happy_path_jira_only(integration_sandbox):
     _assert_byte_equal(stdout, PROJ_ALPHA / "golden.json")
     _allowlisted_calls(integration_sandbox.call_log())
 
+    payload = json.loads(_substitute_generated_at(stdout).decode("utf-8"))
+    assert "cohort_jql" not in payload["meta"]
+    assert "cohort_breakdown" not in payload
+
 
 def test_full_happy_path_with_cohort_jql(integration_sandbox):
     """--cohort-jql 'labels = ai-assisted' adds a cohort_breakdown block;
-    byte-equals fixtures/proj_alpha/golden.cohort.json."""
+    byte-equals fixtures/proj_alpha/golden.cohort.json.
+
+    Also asserts the spec-pinned invariant (plan line 117-118):
+
+        cohort_breakdown.cohort.throughput
+      + cohort_breakdown.control.throughput
+      = aggregates.throughput
+
+    A regression where the cohort/control split miscounts (e.g., counts
+    the same issue on both sides, or drops uncategorised issues) would
+    silently violate this even if it produced plausible-looking numbers.
+    """
     integration_sandbox.use_fixture("proj_alpha", cohort_marker="labels = ai-assisted")
     rc, stdout, stderr = _run_cli([
         "--project", "ALPHA",
@@ -221,6 +254,15 @@ def test_full_happy_path_with_cohort_jql(integration_sandbox):
     ])
     assert rc == 0, "non-zero exit; stderr={}".format(stderr)
     _assert_byte_equal(stdout, PROJ_ALPHA / "golden.cohort.json")
+
+    payload = json.loads(_substitute_generated_at(stdout).decode("utf-8"))
+    cb = payload["cohort_breakdown"]
+    assert (
+        cb["cohort"]["throughput"] + cb["control"]["throughput"]
+        == payload["aggregates"]["throughput"]
+    )
+    # meta.cohort_jql is present when --cohort-jql is provided (spec).
+    assert payload["meta"]["cohort_jql"] == "labels = ai-assisted"
 
 
 def test_full_happy_path_with_metrics_filter(integration_sandbox):
@@ -260,7 +302,10 @@ def test_full_happy_path_csv(integration_sandbox):
 def test_full_happy_path_per_issue(integration_sandbox, tmp_path):
     """--per-issue writes JSONL to --output FILE. Byte-equals golden.per_issue.jsonl.
 
-    Per the spec, line ordering is by key ascending (codepoint).
+    Per the spec, line ordering is by key ascending (codepoint). Without
+    --cohort-jql, the per-issue rows do NOT carry a ``cohort`` field
+    (spec § Cohort behaviour: cohort-field presence is bound to
+    cohort-jql mode; absence means "no cohort tagging").
     """
     integration_sandbox.use_fixture("proj_alpha")
     out_path = tmp_path / "per_issue.jsonl"
@@ -275,6 +320,43 @@ def test_full_happy_path_per_issue(integration_sandbox, tmp_path):
     assert rc == 0, "non-zero exit; stderr={}".format(stderr)
     actual = out_path.read_bytes()
     _assert_byte_equal(actual, PROJ_ALPHA / "golden.per_issue.jsonl")
+    # No cohort field absent --cohort-jql.
+    assert b'"cohort"' not in actual
+
+
+def test_full_happy_path_per_issue_with_cohort_jql(integration_sandbox, tmp_path):
+    """--per-issue + --cohort-jql tags each row with ``cohort: true|false``.
+
+    The cohort fixture marks ALPHA-1, ALPHA-3, ALPHA-7 as cohort
+    members; every other delivered/cancelled/WIP row gets
+    ``cohort: false``. No ``cohort_breakdown`` block is emitted in
+    per-issue mode (spec § Cohort behaviour).
+    """
+    integration_sandbox.use_fixture("proj_alpha", cohort_marker="labels = ai-assisted")
+    out_path = tmp_path / "per_issue.jsonl"
+    rc, stdout, stderr = _run_cli([
+        "--project", "ALPHA",
+        "--from", "2026-01-01", "--to", "2026-01-07",
+        "--per-issue",
+        "--cohort-jql", "labels = ai-assisted",
+        "--output", str(out_path),
+        "--yes",
+        "--no-cache",
+    ])
+    assert rc == 0, "non-zero exit; stderr={}".format(stderr)
+    rows = [
+        json.loads(line)
+        for line in out_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    # Every row has a cohort field.
+    assert all("cohort" in r for r in rows), "cohort field missing on some rows"
+    cohort_keys = {r["key"] for r in rows if r["cohort"]}
+    assert cohort_keys == {"ALPHA-1", "ALPHA-3", "ALPHA-7"}, (
+        "expected cohort = {{ALPHA-1, ALPHA-3, ALPHA-7}}, got {}".format(
+            sorted(cohort_keys)
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +401,42 @@ def test_cache_write_then_read_same_run(integration_sandbox):
     # Output of cache hit must match output of cache miss byte-for-byte
     # (cache contract: same key → same output).
     assert _substitute_generated_at(out1) == _substitute_generated_at(out2)
+
+
+# ---------------------------------------------------------------------------
+# Unmapped status — spec § "Unmapped-status policy" maps to exit 2 with a
+# message naming the offending raw status. This test feeds an in-window
+# issue whose status doesn't appear under any canonical_states entry and
+# asserts main() catches the timeline.UnmappedStatusError and exits 2.
+# ---------------------------------------------------------------------------
+def test_unmapped_status_exits_2_through_main(integration_sandbox, tmp_path):
+    """Regression check for the wired exception handling.
+
+    Pre-fix: UnmappedStatusError leaked from _run_pipeline as an uncaught
+    exception. Post-fix: caught and mapped to EXIT_VALIDATION (2).
+    """
+    bad_fixture = tmp_path / "unmapped_status_fixture"
+    bad_fixture.mkdir()
+    (bad_fixture / "whoami.json").write_text('{"accountId": "test"}', encoding="utf-8")
+    # One issue with a status ("Blocked") absent from the default state
+    # config's canonical_states. The timeline walker raises on first
+    # encounter.
+    (bad_fixture / "search.jsonl").write_text(
+        '{"key":"BAD-1","fields":{"created":"2026-01-02T00:00:00.000+0000",'
+        '"status":{"name":"Blocked"},"issuetype":{"name":"Story"},'
+        '"customfield_10001":"X"},"changelog":{"histories":[]}}\n',
+        encoding="utf-8",
+    )
+    integration_sandbox.monkeypatch.setenv(
+        "FLOW_METRICS_TEST_FIXTURE_DIR", str(bad_fixture)
+    )
+    rc, stdout, stderr = _run_cli([
+        "--project", "BAD",
+        "--from", "2026-01-01", "--to", "2026-01-07",
+        "--no-cache",
+    ])
+    assert rc == 2, "unmapped status must exit 2, got rc={} stderr={}".format(rc, stderr)
+    assert "Blocked" in stderr, "error message must name the offending status"
 
 
 # ---------------------------------------------------------------------------
