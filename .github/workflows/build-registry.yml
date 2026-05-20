@@ -214,25 +214,7 @@ jobs:
         id: changes
         run: |
           # Catch both modified (tracked) and new (untracked) registry.json
-          if git diff --quiet registry.json 2>/dev/null && ! git ls-files --others --exclude-standard | grep -q '^registry.json
-
-      - name: Commit registry.json
-        if: steps.changes.outputs.changed == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add registry.json
-          git commit -m "chore: rebuild registry.json [skip ci]"
-          git push
-
-      - name: Upload registry artifact
-        if: steps.changes.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: registry
-          path: registry.json
-          retention-days: 90
-; then
+          if git diff --quiet registry.json 2>/dev/null && ! git ls-files --others --exclude-standard | grep -qx 'registry.json'; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
