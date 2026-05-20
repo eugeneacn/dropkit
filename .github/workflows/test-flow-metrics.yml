@@ -1,0 +1,59 @@
+# ─── Test: flow-metrics skill ────────────────────────────────────
+#
+# Runs the flow-metrics test suite across a 3-OS × 3-Python matrix
+# (9 combinations). The skill is stdlib-only by spec, so the workflow
+# has no `pip install` step — `actions/setup-python` provides the
+# interpreter and pytest comes from `python -m pytest` against the
+# Python that ships with the runner image.
+#
+# Triggers are path-filtered to flow-metrics so unrelated PRs don't
+# spin up nine jobs. The workflow file itself is in the path filter
+# so changes to the matrix re-run the matrix.
+
+name: Test flow-metrics
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "skills/workflows/flow-metrics/**"
+      - ".github/workflows/test-flow-metrics.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "skills/workflows/flow-metrics/**"
+      - ".github/workflows/test-flow-metrics.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+    defaults:
+      run:
+        working-directory: skills/workflows/flow-metrics
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # The skill itself is stdlib-only — pytest is a CI test-harness
+      # dep, not a runtime dep of the skill. Pinning explicitly so the
+      # workflow doesn't rely on whatever pytest version the runner
+      # image happens to ship (which varies between OS images).
+      - name: Install pytest (test harness only — not a skill runtime dep)
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
