@@ -31,6 +31,7 @@ import hashlib
 import json
 import os
 import time
+import types
 from dataclasses import asdict, fields
 from datetime import datetime
 from pathlib import Path
@@ -140,11 +141,21 @@ def _datetime_field_names() -> frozenset:
     if _DATETIME_FIELD_NAMES is None:
         names = []
         hints = get_type_hints(PerIssueRow)
+        # Accept both ``Optional[datetime]`` (origin ``typing.Union``) and
+        # PEP 604 ``datetime | None`` (origin ``types.UnionType``). Without
+        # the second arm, a future ``per_issue.py`` switch to the ``|``
+        # syntax would silently break the cache: datetimes would still
+        # be *written* as ISO strings (via ``isinstance`` at write-time)
+        # but never *parsed back*, leaving ``PerIssueRow`` carrying raw
+        # strings where datetimes are expected.
         for f in fields(PerIssueRow):
             ann = hints.get(f.name, f.type)
             if ann is datetime:
                 names.append(f.name)
-            elif get_origin(ann) is Union and datetime in get_args(ann):
+                continue
+            origin = get_origin(ann)
+            is_union = origin is Union or origin is types.UnionType
+            if is_union and datetime in get_args(ann):
                 names.append(f.name)
         _DATETIME_FIELD_NAMES = frozenset(names)
     return _DATETIME_FIELD_NAMES
@@ -203,12 +214,15 @@ def write_cache_tee(
     On full drain, ``os.replace`` promotes the tmp to ``<key>.jsonl``.
     On any exception during the source iteration — or when the consumer
     abandons the generator mid-stream — the tmp is left in place for
-    :func:`cleanup_stale_tmps` to remove on a later startup. The
-    PID-suffixed tmp name lets concurrent runs against the same key
-    coexist; ``os.replace`` is atomic so the "last writer wins" the
-    final filename and the loser's tmp is silently shadowed (but
-    cleanup still finds it because we left the loser's tmp behind on
-    its successful replace, which is gone).
+    :func:`cleanup_stale_tmps` to remove on a later startup.
+
+    Concurrent runs with the same key are tolerated: each gets its own
+    PID-suffixed tmp, drains independently, and finalises by ``os.replace``-
+    ing *its own* tmp onto ``<key>.jsonl``. Whichever process replaces
+    last wins the final filename; the earlier process's promoted final
+    is simply overwritten. Cache content is a pure function of the key,
+    so the winner is content-identical to the loser. Neither tmp is
+    orphaned by a successful drain: each is consumed by its own replace.
     """
     _ensure_cache_dir(cache_dir)
     tmp_name = "{}.jsonl.{}.tmp".format(key, os.getpid())
