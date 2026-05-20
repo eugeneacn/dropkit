@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "caller": "test-account",
+    "scope": {"project": "BRAVO"},
+    "window": {"from": "2026-01-01", "to": "2026-01-31"},
+    "state_config_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "issuetype_config_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "schema_version": "2.1",
+    "generated_at": "2026-02-01T00:00:00Z"
+  },
+  "aggregates": {}
+}

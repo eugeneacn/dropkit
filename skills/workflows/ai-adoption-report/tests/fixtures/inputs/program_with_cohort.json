@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "caller": "test-account",
+    "scope": {"program_id": "43"},
+    "window": {"from": "2026-01-01", "to": "2026-01-31"},
+    "state_config_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "issuetype_config_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "schema_version": "1.0",
+    "generated_at": "2026-02-01T00:00:00Z",
+    "cohort_jql": "labels = ai",
+    "per_team_double_counted": false
+  },
+  "aggregates": {},
+  "cohort_breakdown": {
+    "cohort": {},
+    "control": {}
+  }
+}
