@@ -59,15 +59,25 @@ def resolve_cohort_keys(
     """Return the set of issue keys matching ``(scope) AND (cohort_jql)``.
 
     Issues exactly one ``jira: search`` call. The composed JQL ends in
-    ``ORDER BY key ASC`` for canonical iteration order — required even
-    though the result is set-typed because callers may use this same
-    helper to enumerate cohort keys in deterministic order for
-    diagnostics.
+    ``ORDER BY key ASC`` — :func:`compose_jql` is the canonical iteration-
+    order anchor and applies the suffix uniformly to every JQL the skill
+    builds, even when (as here) the call site returns a set.
 
     No window clause is added. Cohort membership is a property of the
     issue, not of the window; the main fetch's in-scope rows define the
     intersection point at tagging time.
+
+    Raises :class:`ValueError` on an empty / whitespace ``cohort_jql``.
+    Without that guard, :func:`compose_jql`'s no-user-clause branch
+    would yield scope-only JQL and silently mark every in-scope issue
+    ``cohort=True`` — plausible-looking output with the cohort/control
+    split inverted. Callers gate on ``--cohort-jql`` being set; this
+    raise is the building-block's last-line defence.
     """
+    if cohort_jql is None or cohort_jql.strip() == "":
+        raise ValueError(
+            "resolve_cohort_keys: cohort_jql must be a non-empty JQL expression"
+        )
     full_jql = compose_jql(scope, cohort_jql, order_by_key=True)
     keys: Set[str] = set()
     for issue in jira.search(full_jql, fields=_COHORT_SEARCH_FIELDS):
@@ -110,6 +120,12 @@ def aggregate_cohort(
     fall out for free: ``rework_rate`` divides by the cohort throughput,
     ``flow_distribution.denominator`` counts the cohort's delivered-in-
     window issues, etc.
+
+    Uses strict ``is`` comparison: untagged rows (``cohort is None``)
+    match neither the cohort nor the control subset and are dropped.
+    That's load-bearing — callers must run :func:`tag_cohort` first;
+    silently bucketing untagged rows as "control" would invert the
+    cohort/control split when cohort tagging was skipped by mistake.
     """
     subset = (r for r in rows if r.cohort is cohort)
     # T6-API: aggregate(rows, window, config, *, include_subtasks=False).

@@ -196,19 +196,22 @@ def test_per_issue_omits_cohort_breakdown() -> None:
     """In per-issue mode, every JSONL row carries the cohort field; the
     aggregate-only ``cohort_breakdown`` object never exists on a row.
 
-    Tested at the data-shape boundary: :func:`tag_cohort` is the per-
-    issue cohort path; it sets the row-level ``cohort`` bool and adds
-    no breakdown structure to the rows themselves. T10 enforces the
-    rendering contract (no ``cohort_breakdown`` in JSONL output).
+    Tested at the serialization boundary: ``dataclasses.asdict`` is
+    what T10's JSONL emitter walks. The row dict must carry ``cohort``
+    as a bool and must NOT carry ``cohort_breakdown`` — the breakdown
+    is an aggregate-mode object only.
     """
+    from dataclasses import asdict
+
     rows = [_row(key="PROJ-1"), _row(key="PROJ-2")]
     tagged = list(tag_cohort(iter(rows), {"PROJ-1"}))
     assert tagged[0].cohort is True
     assert tagged[1].cohort is False
-    # PerIssueRow has no ``cohort_breakdown`` attribute — that's an
-    # aggregate-mode-only object, never present per-row.
-    assert not hasattr(tagged[0], "cohort_breakdown")
-    assert not hasattr(tagged[1], "cohort_breakdown")
+    for row in tagged:
+        d = asdict(row)
+        assert "cohort" in d
+        assert isinstance(d["cohort"], bool)
+        assert "cohort_breakdown" not in d
 
 
 def test_meta_cohort_jql_omitted_when_absent() -> None:
@@ -343,6 +346,24 @@ def test_aggregate_cohort_filters_by_flag() -> None:
     assert control_block.throughput == 1
 
 
+def test_aggregate_cohort_excludes_untagged_rows() -> None:
+    """Untagged rows (``cohort is None``) must not be bucketed by
+    :func:`aggregate_cohort` — they belong to neither cohort nor
+    control. This locks in the strict-``is`` filter so a future
+    truthiness-based rewrite (which would silently bucket ``None`` as
+    control) is caught by CI."""
+    rows = [
+        _row(key="A", cohort=True),
+        _row(key="B", cohort=None),     # untagged
+        _row(key="C", cohort=False),
+    ]
+    cohort_block = aggregate_cohort(rows, cohort=True, config=STATE, window=WINDOW)
+    control_block = aggregate_cohort(rows, cohort=False, config=STATE, window=WINDOW)
+    assert cohort_block.throughput == 1
+    # Untagged row is NOT silently classified as control.
+    assert control_block.throughput == 1
+
+
 def test_resolve_cohort_keys_uses_compose_jql_parenthesization() -> None:
     """``resolve_cohort_keys`` must route through :func:`compose_jql` so
     a buggy implementation that string-concats can't slip past."""
@@ -351,6 +372,20 @@ def test_resolve_cohort_keys_uses_compose_jql_parenthesization() -> None:
     assert stub.search_calls[0]["jql"] == (
         "(project = PROJ) AND (a OR b) ORDER BY key ASC"
     )
+
+
+def test_resolve_cohort_keys_rejects_empty_cohort_jql() -> None:
+    """An empty cohort JQL would otherwise fall through
+    :func:`compose_jql`'s no-user-clause branch, yielding scope-only
+    JQL and silently marking every in-scope issue ``cohort=True``.
+    The building block refuses up-front; the upstream search is never
+    invoked."""
+    import pytest
+    stub = _StubJira([])
+    for bad in (None, "", "   ", "\t\n"):
+        with pytest.raises(ValueError):
+            resolve_cohort_keys(stub, cohort_jql=bad, scope="project = PROJ")
+    assert stub.search_calls == []
 
 
 def test_tag_cohort_handles_already_tagged_rows() -> None:
