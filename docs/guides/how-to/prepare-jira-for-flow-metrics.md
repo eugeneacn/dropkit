@@ -8,6 +8,16 @@ numbers that match what your team actually does.
 Allow about 30 minutes. You'll need browse access to the Jira project
 and edit access to a local config file.
 
+**Before you start: the `jira` skill must be set up.** `flow-metrics`
+makes every Jira call through it; an unconfigured `jira` skill means
+exit 3 on every run. If
+`python skills/integrations/jira/scripts/jira.py check` doesn't exit
+0, finish [Set up the jira skill](set-up-jira-skill.md) first. If
+you plan to run `--program-id` or `--portfolio-id` scopes, also
+finish [Set up the jira-align skill](set-up-jira-align-skill.md) —
+otherwise the program / portfolio scopes exit 2 regardless of how
+clean your state config is.
+
 This is task-oriented. For the *why* behind the cohort decision in
 step 4, see
 [Explanation: the cohort model](../explanation/cohort-model.md).

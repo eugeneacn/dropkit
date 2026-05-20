@@ -17,12 +17,18 @@ first — it covers the status audit, team-field validation, and
 cohort-label decision that this page assumes are already done.
 
 1. **Install dropkit** and the `jira` skill, and configure credentials
-   for it (the `jira` skill owns `~/.config/dropkit/credentials.env`;
-   `flow-metrics` never reads that file itself).
+   for it. The `jira` skill owns `~/.config/dropkit/credentials.env`;
+   `flow-metrics` never reads that file itself, it just calls the
+   skill. Step-by-step:
+   [Set up the jira skill](set-up-jira-skill.md). If
+   `python skills/integrations/jira/scripts/jira.py check` doesn't
+   exit 0, every `flow-metrics` run exits 3 — fix this first.
 2. **Jira Align scopes (`--program-id`, `--portfolio-id`) only:** also
-   install `jira-align` and confirm you can reach it (e.g. a
-   `jira-align: raw GET programs/<id>` against any ID you have access
-   to).
+   install and configure `jira-align`. Step-by-step:
+   [Set up the jira-align skill](set-up-jira-align-skill.md), which
+   also covers the
+   [`align_join_field` wiring](set-up-jira-align-skill.md#wiring-up-flow-metrics-jira-align-scopes)
+   you'll need before program / portfolio runs work.
 3. **Pick or write a state config.** The shipped default at
    `references/states.default.json` maps six canonical states:
    `backlog` (raw: "Backlog", "To Do", "Open"); `in_progress` ("In

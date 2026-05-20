@@ -17,7 +17,14 @@ The full contract lives in
 [`docs/specs/ai-adoption-report.md`](../../specs/ai-adoption-report.md).
 This guide assumes you've already produced the `flow-metrics` JSONs —
 if not, start with
-[Run flow-metrics](run-flow-metrics.md).
+[Run flow-metrics](run-flow-metrics.md). That, in turn, depends on
+the `jira` skill being set up; see
+[Set up the jira skill](set-up-jira-skill.md) if you've never run
+any of this before.
+
+Because this skill makes no upstream calls, no Jira credentials are
+needed to run it — only the JSON files produced by upstream
+`flow-metrics` runs.
 
 ## Before you start
 
