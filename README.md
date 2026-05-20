@@ -2,7 +2,7 @@
 
 Dropkit is a folder of agent playbooks. Each skill is a self-contained directory containing a `SKILL.md` (the agent reads this), a `scripts/` folder (deterministic tooling the agent calls), and a `manifest.json` (deps and I/O). Drop a directory into `~/.claude/skills/` (or your IDE's equivalent) and the skill is installed.
 
-Today the registry covers Atlassian integrations (Jira, Jira Align, Confluence space crawling), file-to-Markdown conversion (PDF, DOCX, XLSX, PPTX, images), Markdown-to-HTML rendering, Outlook `.msg` email conversion, and OpenAPI 3.1 contract generation against the Zalando guidelines. Heavier work (auth flows, retries, pagination, parsing, multipart uploads) lives in the `scripts/` of each skill, so the agent's job stays small: pick a subcommand, run it, relay the output.
+Today the registry covers Atlassian integrations (Jira, Jira Align, Confluence space crawling), file-to-Markdown conversion (PDF, DOCX, XLSX, XLS, PPTX, images), Markdown-to-HTML rendering, Outlook `.msg` email conversion, OpenAPI 3.1 contract generation against the Zalando guidelines, and composed workflows (end-to-end Jira defect lifecycle, Flow Framework / DORA metrics). Heavier work (auth flows, retries, pagination, parsing, multipart uploads) lives in the `scripts/` of each skill, so the agent's job stays small: pick a subcommand, run it, relay the output.
 
 ## Quickstart
 
@@ -28,6 +28,7 @@ For a working skill in your IDE, jump to **[Installing a skill into your IDE](#i
 | [jira](skills/integrations/jira/) | integrations | Read and write Jira (Cloud or Server / Data Center) from chat — JQL search, fetch / create / update / delete issues, apply transitions, add comments and attachments, list projects and users. Auto-handles Cloud (REST v3, basic auth, ADF, nextPageToken) vs Server (REST v2, bearer PAT, plain text, startAt). Exports as JSON, JSONL, or CSV. The agent never sees your API token. | pip (see `requirements.txt`) |
 | [jira-align](skills/integrations/jira-align/) | integrations | Read and write Jira Align (Cloud or self-hosted) from chat — fetch, filter, and export epics, features, stories, teams, and more; create and update records; delete with confirmation. Exports as JSON, JSONL, or CSV. The agent never sees your API token. | pip (see `requirements.txt`) |
 | [jira-defect-flow](skills/workflows/jira-defect-flow/) | workflows | End-to-end Jira defect lifecycle: pull the ticket via `jira`, hand the actual fix to the [`bug-fix`](https://github.com/eugenelim/agent-ready-repo) skill (reproduction-first, root-cause, minimum-diff, regression test), open a PR with `Closes: <KEY>`, comment + transition the ticket. Pure choreography — composes existing skills. Optional dev-deploy hook. | `jira` skill + `bug-fix` skill + `gh` |
+| [flow-metrics](skills/workflows/flow-metrics/) | workflows | Read-only Flow Framework / DORA metrics (cycle time, lead time, throughput, WIP, flow load, rework rate, flow efficiency, flow distribution, defect ratio) over a Jira project / team / Jira Align program / portfolio scope. Composes the `jira` skill (and `jira-align` for program / portfolio scope) by name; emits canonical JSON / CSV / per-issue JSONL. Stdlib only. | `jira` skill (+ `jira-align` for Align scope), Python ≥ 3.10 |
 
 ---
 
@@ -76,12 +77,22 @@ Cursor does not have a native "skills" concept, but you can install a skill as a
 
 ### Kiro
 
-Kiro supports agent instructions via steering files and custom agents:
+Kiro supports Agent Skills natively (since Kiro 0.9, Feb 2026) and follows the open [agentskills.io](https://agentskills.io) standard, so dropkit skills drop in unchanged:
 
-1. Copy the skill folder to `.kiro/skills/<skill-name>/`.
-2. Add a steering file at `.kiro/steering/<skill-name>.md` that points Kiro to the skill's `SKILL.md` when the matching task is requested.
+- **Workspace-scope** (tracked with the repo): `<project>/.kiro/skills/<skill-name>/`
+- **Global-scope** (available in every workspace): `~/.kiro/skills/<skill-name>/`
 
-Alternatively, paste the contents of `SKILL.md` into a custom Kiro agent definition.
+```bash
+# global (recommended)
+mkdir -p ~/.kiro/skills
+cp -R skills/converters/file-to-markdown ~/.kiro/skills/
+
+# workspace
+mkdir -p .kiro/skills
+cp -R skills/converters/file-to-markdown .kiro/skills/
+```
+
+Kiro discovers skills at startup by reading the `name` and `description` from `SKILL.md` frontmatter, then loads the full instructions only when your request matches. Workspace skills override global skills on name conflict.
 
 ### Other IDEs (Continue, Cline, Aider, etc.)
 
@@ -322,7 +333,7 @@ dropkit/
 
 To add a new skill:
 
-1. **Pick a category.** Reuse one of the existing folders under `skills/` (`contracts`, `converters`, `crawlers`, `integrations`) or create a new one if nothing fits.
+1. **Pick a category.** Reuse one of the existing folders under `skills/` (`contracts`, `converters`, `crawlers`, `integrations`, `workflows`) or create a new one if nothing fits.
 2. **Create the skill folder** at `skills/<category>/<skill-name>/`.
 3. **Write `manifest.json`.** Match the shape of existing skills — `id`, `name`, `version`, `description`, `category`, `tags`, `deps`, `input`, `output`, and `targets`.
 4. **Write `SKILL.md`.** Keep it thin: describe *when* to use the skill and *how* to dispatch to its scripts. Don't reimplement logic in prose.
