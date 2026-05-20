@@ -15,6 +15,10 @@ Field-presence rules per docs/specs/flow-metrics.md § "Per-issue mode":
   delivery-based fields and ``0`` for ``rework_count``;
   ``cycle_eligible`` is ``false``.
 - ``cohort`` is left as ``None`` here; the cohort path (T8) stamps it.
+- ``wip_samples`` carries one bool per inclusive calendar day in the
+  window (anchor: ``(d + 1 day) 00:00 UTC − 1µs``). T6's Flow Load
+  computation is a streaming sum across rows of these per-day samples;
+  the last sample is identically ``wip_at_to``.
 
 The streaming entry point :func:`iter_per_issue_rows` calls
 :meth:`JiraClient.search` once (with ``compose_jql(..., order_by_key=
@@ -26,9 +30,9 @@ Stdlib only. Python >= 3.10.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, Iterable, Iterator, List, Mapping, Optional
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any, Iterable, Iterator, List, Mapping, Optional, Tuple
 
 from . import compose_jql
 from .changelog import ChangelogEntry, iter_issue_changelog
@@ -72,6 +76,7 @@ class PerIssueRow:
     delivered_in_window: bool
     cancelled_in_window: bool
     wip_at_to: bool
+    wip_samples: Tuple[bool, ...] = field(default_factory=tuple)
     cohort: Optional[bool] = None
 
 
@@ -159,6 +164,44 @@ def _flow_efficiency(
     return active.total_seconds() / total_s
 
 
+def _wip_samples(
+    timeline: Timeline,
+    state_config: StateConfig,
+    window: Any,
+    delivered: bool,
+) -> Tuple[bool, ...]:
+    """Per-day WIP-style samples for the inclusive window.
+
+    One bool per calendar day ``d`` from ``window.from_date`` through
+    ``window.to_date`` inclusive, sampled at ``(d + 1 day) 00:00 UTC −
+    1µs`` — the same anchor as :func:`predicates.wip_at_to`. A delivered-
+    in-window issue contributes all-``False`` (the WIP membership
+    predicate excludes it on every day); a non-delivered issue gets one
+    ``True`` per day where its canonical state at the anchor is in
+    ``active_states``. Samples taken before the issue's ``created`` are
+    forced to ``False`` (an issue cannot be WIP before it exists).
+    T6's :func:`aggregate.aggregate` sums these column-wise across rows
+    to derive Flow Load.
+    """
+    sample_count = (window.to_date - window.from_date).days + 1
+    if delivered:
+        return tuple([False] * sample_count)
+    active = state_config.active_states
+    out: List[bool] = []
+    for i in range(sample_count):
+        day = window.from_date + timedelta(days=i)
+        anchor = (
+            datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+            + timedelta(days=1)
+            - timedelta(microseconds=1)
+        )
+        if anchor < timeline.created:
+            out.append(False)
+            continue
+        out.append(timeline.state_at(anchor) in active)
+    return tuple(out)
+
+
 def derive_row(
     issue: Mapping,
     changelog: Iterable[ChangelogEntry],
@@ -181,6 +224,7 @@ def derive_row(
     cancelled = cancelled_in_window(timeline, window)
     wip = wip_at_to(timeline, window)
     is_cycle_eligible = cycle_eligible(timeline, window) if delivered else False
+    wip_samples = _wip_samples(timeline, state_config, window, delivered)
 
     first_delivery_at: Optional[datetime] = None
     first_commitment_at: Optional[datetime] = None
@@ -241,6 +285,7 @@ def derive_row(
         delivered_in_window=delivered,
         cancelled_in_window=cancelled,
         wip_at_to=wip,
+        wip_samples=wip_samples,
         cohort=None,
     )
 

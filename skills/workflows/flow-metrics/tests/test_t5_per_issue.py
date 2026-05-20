@@ -803,7 +803,7 @@ class TestConstruction:
             "cycle_eligible", "cycle_time_hours", "lead_time_hours",
             "flow_efficiency", "rework_count", "issuetype_at_delivery",
             "issuetype_bucket", "team", "delivered_in_window",
-            "cancelled_in_window", "wip_at_to", "cohort",
+            "cancelled_in_window", "wip_at_to", "wip_samples", "cohort",
         }
         assert {f.name for f in dc_fields(PerIssueRow)} == expected_fields
 
