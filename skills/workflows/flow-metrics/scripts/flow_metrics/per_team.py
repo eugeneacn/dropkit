@@ -112,9 +112,29 @@ def bucket_by_team(
     the T11 NotesCollector satisfies the interface; tests pass a
     ``MagicMock``.
     """
+    # Array-kind footgun: PerIssueRow.team carries only the *first* team
+    # for array-valued team fields (T5's _resolve_team collapses on the
+    # way in). Without a teams_for_row callable to enumerate the full
+    # list, bucket_by_team would silently degrade array kind to single-
+    # value semantics — wrong throughput, missing overlap, no rationale
+    # in the output. Refuse upfront so the caller is forced to thread
+    # the team list through.
+    if (
+        teams_for_row is None
+        and team_field is not None
+        and team_field.kind == "array"
+    ):
+        raise ValueError(
+            "bucket_by_team: team_field.kind='array' requires a teams_for_row "
+            "callable; PerIssueRow.team carries only the first team for array "
+            "fields (per T5), so the full team list must be supplied by the "
+            "caller (e.g. from a key->teams lookup built while walking issues)."
+        )
+
     extractor: TeamsExtractor = teams_for_row or _default_teams_for_row
     buckets: Dict[str, List[PerIssueRow]] = {}
     no_team_count = 0
+    double_counted = 0
 
     for row in rows:
         team_names = list(extractor(row))
@@ -124,6 +144,12 @@ def bucket_by_team(
             team_names = [NO_TEAM]
         if NO_TEAM in team_names:
             no_team_count += 1
+        # An issue with two or more *distinct* teams is counted in each —
+        # the "K issues belong to multiple teams" tally the spec asks
+        # for. Duplicate team names in a single row's extractor output
+        # don't multiply the count.
+        if len(set(team_names)) > 1:
+            double_counted += 1
         for name in team_names:
             buckets.setdefault(name, []).append(row)
 
@@ -134,15 +160,17 @@ def bucket_by_team(
         notes.add_field_permission_undercount(field_id, no_team_count)
 
     # Surface the per_team_double_counted note on array kind. T11 words
-    # it; we just signal the trigger condition exactly once per run.
+    # it; we supply the K count the spec asks for ("K issues belong to
+    # multiple teams and are counted in each").
     if (
         notes is not None
         and team_field is not None
         and team_field.kind == "array"
     ):
-        # T11-API: notes.add_per_team_double_counted() — when the team
-        # field is array-kind and per_team rows can therefore overlap.
-        notes.add_per_team_double_counted()
+        # T11-API: notes.add_per_team_double_counted(n) — count of issues
+        # that belong to more than one team and are therefore counted in
+        # each team's per_team rollup.
+        notes.add_per_team_double_counted(double_counted)
 
     return buckets
 

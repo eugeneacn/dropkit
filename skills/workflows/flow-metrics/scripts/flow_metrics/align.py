@@ -91,17 +91,25 @@ def validate_align_teams_path(path: str) -> str:
 # ---------------------------------------------------------------------------
 # Scope + team types
 # ---------------------------------------------------------------------------
-_PROGRAM_KIND = "program-id"
-_PORTFOLIO_KIND = "portfolio-id"
+# Canonical scope_kind values, shared with :mod:`flow_metrics.cache` (which
+# pins the same vocabulary in the cache-key payload — spec § Caching:
+# ``scope_kind: "project" | "program" | "portfolio"``). Using anything
+# else here would silently break cache-key derivation when T10 wires this
+# module into the main run.
+PROJECT_KIND = "project"
+PROGRAM_KIND = "program"
+PORTFOLIO_KIND = "portfolio"
+_ALIGN_KINDS = frozenset({PROGRAM_KIND, PORTFOLIO_KIND})
 
 
 @dataclass(frozen=True)
 class AlignScope:
     """Resolved Jira Align scope from the CLI.
 
-    ``kind`` is one of ``"program-id"`` / ``"portfolio-id"``; ``value`` is
-    the numeric id as a string (Jira Align IDs are always integers in
-    v1). ``teams_path_override`` mirrors ``--align-teams-path`` after
+    ``kind`` is one of ``"program"`` / ``"portfolio"`` (matching the
+    spec-pinned cache vocabulary, not the CLI flag spelling). ``value``
+    is the numeric id as a string (Jira Align IDs are always integers
+    in v1). ``teams_path_override`` mirrors ``--align-teams-path`` after
     :func:`validate_align_teams_path` has already accepted it.
     """
 
@@ -209,10 +217,10 @@ def _parse_program_ids(payload: Any, path: str) -> List[str]:
 def resolve_teams(align: JiraAlignClient, scope: AlignScope) -> List[Team]:
     """Resolve the list of teams visible under ``scope``.
 
-    - ``program-id``: one ``raw GET programs/<id>/teams`` call (or the
+    - ``program`` kind: one ``raw GET programs/<id>/teams`` call (or the
       ``--align-teams-path`` override, validated already).
-    - ``portfolio-id``: walk ``portfolios/<id>/programs`` first, then for
-      each program issue ``programs/<pid>/teams``. The contract test
+    - ``portfolio`` kind: walk ``portfolios/<id>/programs`` first, then
+      for each program issue ``programs/<pid>/teams``. The contract test
       ``test_portfolio_scope_walks_programs_then_teams`` pins the call
       sequence — portfolio listing before any team listing, programs in
       the order Jira Align returned them.
@@ -221,18 +229,18 @@ def resolve_teams(align: JiraAlignClient, scope: AlignScope) -> List[Team]:
     violation raises :class:`AlignResponseError` so the CLI exits 3 with
     the path that produced the bad payload.
     """
-    if scope.kind == _PROGRAM_KIND:
+    if scope.kind == PROGRAM_KIND:
         path = scope.teams_path_override or "programs/{}/teams".format(scope.value)
         payload = align.raw_get(path)
         return _parse_team_items(payload, path)
 
-    if scope.kind == _PORTFOLIO_KIND:
+    if scope.kind == PORTFOLIO_KIND:
         portfolios_path = "portfolios/{}/programs".format(scope.value)
         programs_payload = align.raw_get(portfolios_path)
         program_ids = _parse_program_ids(programs_payload, portfolios_path)
         teams: List[Team] = []
         for pid in program_ids:
-            # The override applies to program-id scope only — at portfolio
+            # The override applies to program kind only — at portfolio
             # scope we always walk each program's canonical teams path.
             teams_path = "programs/{}/teams".format(pid)
             payload = align.raw_get(teams_path)
@@ -240,9 +248,7 @@ def resolve_teams(align: JiraAlignClient, scope: AlignScope) -> List[Team]:
         return teams
 
     raise ValueError(
-        "AlignScope.kind must be 'program-id' or 'portfolio-id'; got {!r}".format(
-            scope.kind
-        )
+        "AlignScope.kind must be 'program' or 'portfolio'; got {!r}".format(scope.kind)
     )
 
 
@@ -308,18 +314,24 @@ def require_align_join_field(
 def compute_sources(scope_kind: Optional[str]) -> List[str]:
     """Return the sorted list of upstream skill names used for this run.
 
-    ``project`` scope hits only Jira; ``program-id`` / ``portfolio-id``
-    also hit Jira Align. The contract test
-    ``test_meta_sources_reflects_skills_called`` pins both shapes. T10
-    merges this into the top-level ``meta`` block.
+    ``project`` scope hits only Jira; ``program`` / ``portfolio`` also
+    hit Jira Align. ``scope_kind`` values match the spec-pinned cache
+    vocabulary (also accepted in their CLI-flag spellings ``program-id``
+    / ``portfolio-id`` so call sites can pass either without an explicit
+    conversion). The contract test ``test_meta_sources_reflects_skills_
+    called`` pins both shapes. T10 merges this into the top-level
+    ``meta`` block.
     """
     sources = ["jira"]
-    if scope_kind in (_PROGRAM_KIND, _PORTFOLIO_KIND):
+    if scope_kind in _ALIGN_KINDS or scope_kind in ("program-id", "portfolio-id"):
         sources.append("jira-align")
     return sorted(sources)
 
 
 __all__ = [
+    "PORTFOLIO_KIND",
+    "PROGRAM_KIND",
+    "PROJECT_KIND",
     "AlignResponseError",
     "AlignScope",
     "Team",

@@ -139,12 +139,26 @@ def test_jira_only_run_does_not_call_jira_align() -> None:
 
 def test_program_scope_uses_raw_get_teams_path() -> None:
     """With ``--program-id 42`` the mocked ``jira-align`` records exactly
-    one call to ``raw GET programs/42/teams``."""
+    one call to ``raw GET programs/42/teams`` (or the
+    ``--align-teams-path`` override when set)."""
+    # Default path: programs/<id>/teams.
     align = _StubAlign({"programs/42/teams": [{"id": 1}, {"id": 2}]})
-    scope = AlignScope(kind="program-id", value="42")
+    scope = AlignScope(kind="program", value="42")
     teams = resolve_teams(align, scope)
     assert align.calls == ["programs/42/teams"]
     assert [t.id for t in teams] == ["1", "2"]
+
+    # Override honored at call time: the override path is used verbatim
+    # even when its ``<id>`` differs from the scope id. Validation of
+    # the override happens at startup via :func:`validate_align_teams_path`
+    # — by the time the override reaches :func:`resolve_teams` it is
+    # already known-safe.
+    align2 = _StubAlign({"programs/99/teams": [{"id": 5}]})
+    scope2 = AlignScope(
+        kind="program", value="42", teams_path_override="programs/99/teams"
+    )
+    resolve_teams(align2, scope2)
+    assert align2.calls == ["programs/99/teams"]
 
 
 def test_program_scope_teams_intersected_via_jira_team_field() -> None:
@@ -152,7 +166,7 @@ def test_program_scope_teams_intersected_via_jira_team_field() -> None:
     through ``jira: search`` with the configured ``team_field.id`` in
     the JQL — not via Jira Align."""
     align = _StubAlign({"programs/42/teams": [{"id": 1}, {"id": 7}]})
-    scope = AlignScope(kind="program-id", value="42")
+    scope = AlignScope(kind="program", value="42")
     teams = resolve_teams(align, scope)
     jql = compose_program_scope_jql(
         team_field_id="customfield_10001",
@@ -200,7 +214,7 @@ def test_align_teams_path_validates_response_shape() -> None:
     with ``"unexpected response shape from <path>"`` — the CLI maps that
     to exit 3."""
     align = _StubAlign({"programs/42/teams": [{"name": "Foo"}]})
-    scope = AlignScope(kind="program-id", value="42")
+    scope = AlignScope(kind="program", value="42")
     with pytest.raises(
         AlignResponseError,
         match=r"unexpected response shape from programs/42/teams",
@@ -235,7 +249,11 @@ def test_per_team_array_kind_double_count_flagged() -> None:
     assert total == 3 and total > len(rows)
     # meta-level signal that T10 will surface as ``per_team_double_counted``.
     assert per_team_double_counted(team_field) is True
-    notes.add_per_team_double_counted.assert_called_once()
+    # K = 1: only issue A belongs to more than one team (Foo + Bar);
+    # issue B is in just Bar. The notes collector receives the K count
+    # so T11 can fill the spec wording "K issues belong to multiple
+    # teams and are counted in each".
+    notes.add_per_team_double_counted.assert_called_once_with(1)
 
 
 def test_per_team_single_value_kind_sums_to_throughput() -> None:
@@ -299,14 +317,16 @@ def test_meta_sources_reflects_skills_called() -> None:
     meta block by T10."""
     assert compute_sources("project") == ["jira"]
     # Both Jira Align scopes share the same source list — there's no
-    # finer-grained ``portfolio`` skill.
+    # finer-grained ``portfolio`` skill. The helper accepts both the
+    # spec-pinned cache vocabulary (``program``/``portfolio``) and the
+    # CLI-flag spelling (``program-id``/``portfolio-id``).
+    assert compute_sources("program") == ["jira", "jira-align"]
+    assert compute_sources("portfolio") == ["jira", "jira-align"]
     assert compute_sources("program-id") == ["jira", "jira-align"]
     assert compute_sources("portfolio-id") == ["jira", "jira-align"]
-    # Sorting is alphabetical: ``jira-align`` < ``jira`` lexicographically
-    # because ``-`` (0x2D) precedes any letter, so the order is in fact
-    # ["jira", "jira-align"] when we put jira first then jira-align —
-    # confirm the helper returns codepoint-sorted output regardless.
-    assert compute_sources("program-id") == sorted(["jira", "jira-align"])
+    # Codepoint sort: "jira" < "jira-align" (shorter prefix-equal string
+    # sorts first). The helper's output must equal :func:`sorted`.
+    assert compute_sources("program") == sorted(["jira", "jira-align"])
 
 
 # ===========================================================================
@@ -370,7 +390,7 @@ def test_portfolio_scope_walks_programs_then_teams() -> None:
         "programs/11/teams": [{"id": 100}, {"id": 101}],
         "programs/22/teams": [{"id": 200}],
     })
-    scope = AlignScope(kind="portfolio-id", value="7")
+    scope = AlignScope(kind="portfolio", value="7")
     teams = resolve_teams(align, scope)
     # Portfolio listing strictly before any team listing.
     assert align.calls == [
@@ -413,7 +433,15 @@ def test_field_level_permission_undercount_recorded() -> None:
     has ``team == NO_TEAM`` (T5's :func:`_resolve_team` does the
     conversion), goes into a synthetic ``(no team)`` per_team row, and
     ``notes.add_field_permission_undercount`` is called with the count.
+
+    Also pins the reconcile-with-global property the spec calls out:
+    routing null-team rows into the synthetic bucket (instead of
+    dropping them) keeps ``sum(per_team[*].throughput) ==
+    aggregates.throughput`` for single_value kinds even when permissions
+    masked the team.
     """
+    from flow_metrics.aggregate import aggregate
+
     team_field = TeamField(id="customfield_10001", kind="single_value")
     rows = [
         _row(key="A", team="Foo"),
@@ -421,7 +449,7 @@ def test_field_level_permission_undercount_recorded() -> None:
         _row(key="C", team=NO_TEAM),
     ]
     notes = MagicMock()
-    buckets = bucket_by_team(rows, team_field, notes=notes)
+    buckets = bucket_by_team(list(rows), team_field, notes=notes)
     # Synthetic "(no team)" bucket exists and has the orphaned row.
     assert NO_TEAM in buckets
     assert [r.key for r in buckets[NO_TEAM]] == ["C"]
@@ -436,3 +464,18 @@ def test_field_level_permission_undercount_recorded() -> None:
     # aggregates still reconcile with the per-team sum (single_value).
     assert NO_TEAM in by_team
     assert by_team[NO_TEAM].aggregates.throughput == 1
+    # Global reconciliation: per_team sum matches aggregates.throughput.
+    global_block = aggregate(iter(rows), WINDOW, STATE)
+    assert sum(r.aggregates.throughput for r in out) == global_block.throughput
+
+
+def test_bucket_by_team_array_kind_without_extractor_raises() -> None:
+    """``team_field.kind='array'`` without a ``teams_for_row`` callable
+    is rejected upfront: PerIssueRow only carries the first team for
+    array fields, so silently degrading to single-value semantics would
+    produce wrong throughput. Refuses with a message that names the
+    missing argument so the caller can see the contract."""
+    team_field = TeamField(id="customfield_10001", kind="array")
+    rows = [_row(key="A", team="Foo")]
+    with pytest.raises(ValueError, match="teams_for_row"):
+        bucket_by_team(rows, team_field)
