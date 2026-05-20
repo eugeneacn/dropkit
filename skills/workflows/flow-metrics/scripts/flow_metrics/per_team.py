@@ -166,21 +166,16 @@ def bucket_by_team(
 
     if no_team_count and notes is not None:
         field_id = team_field.id if team_field is not None else None
-        # T11-API: notes.add_field_permission_undercount(field, n) — when
-        # N in-scope issues had no readable team_field value.
         notes.add_field_permission_undercount(field_id, no_team_count)
 
-    # Surface the per_team_double_counted note on array kind. T11 words
-    # it; we supply the K count the spec asks for ("K issues belong to
-    # multiple teams and are counted in each").
+    # Surface the per_team_double_counted note on array kind. We supply
+    # the K count the spec asks for ("K issues belong to multiple teams
+    # and are counted in each"); T11's NotesCollector renders the line.
     if (
         notes is not None
         and team_field is not None
         and team_field.kind == "array"
     ):
-        # T11-API: notes.add_per_team_double_counted(n) — count of issues
-        # that belong to more than one team and are therefore counted in
-        # each team's per_team rollup.
         notes.add_per_team_double_counted(double_counted)
 
     return buckets

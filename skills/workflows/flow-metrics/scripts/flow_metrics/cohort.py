@@ -159,8 +159,6 @@ def build_cohort_breakdown(
     control_rows = [r for r in materialised if not r.cohort]
 
     if not cohort_rows:
-        # T11-API: notes.add_empty_cohort() — when the resolved cohort
-        # key set is disjoint from in-scope rows.
         notes.add_empty_cohort()
 
     # T6-API: aggregate(rows, window, config, *, include_subtasks=False).
