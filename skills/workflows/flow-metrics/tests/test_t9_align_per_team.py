@@ -469,6 +469,31 @@ def test_field_level_permission_undercount_recorded() -> None:
     assert sum(r.aggregates.throughput for r in out) == global_block.throughput
 
 
+def test_bucket_by_team_array_kind_dedupes_duplicate_teams_per_row() -> None:
+    """An array-kind ``team_field`` whose upstream data contains
+    redundant entries (e.g. ``["Foo", "Foo"]`` from a misconfigured
+    Jira customfield) must not inflate a team's throughput. Each row
+    appears in a given bucket at most once; the K double-count tally
+    counts the row only once."""
+    team_field = TeamField(id="customfield_10001", kind="array")
+    rows = [_row(key="A")]
+    notes = MagicMock()
+    buckets = bucket_by_team(
+        rows,
+        team_field,
+        teams_for_row=lambda r: ["Foo", "Foo"],  # malformed but plausible
+        notes=notes,
+    )
+    # The row appears in Foo exactly once — no inflation.
+    assert buckets == {"Foo": [rows[0]]}
+    out = per_team_rollup(buckets, STATE, WINDOW)
+    assert len(out) == 1 and out[0].team == "Foo"
+    assert out[0].aggregates.throughput == 1
+    # K = 0: post-dedupe the row has only one distinct team, so it is
+    # NOT counted as a multi-team issue.
+    notes.add_per_team_double_counted.assert_called_once_with(0)
+
+
 def test_bucket_by_team_array_kind_without_extractor_raises() -> None:
     """``team_field.kind='array'`` without a ``teams_for_row`` callable
     is rejected upfront: PerIssueRow only carries the first team for

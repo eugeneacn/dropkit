@@ -137,18 +137,29 @@ def bucket_by_team(
     double_counted = 0
 
     for row in rows:
-        team_names = list(extractor(row))
-        # Filter out empties; if nothing remains, route to "(no team)".
-        team_names = [t for t in team_names if isinstance(t, str) and t]
+        # Filter out empties and de-duplicate within the row: if the
+        # extractor returns the same team twice (e.g. an array Jira
+        # field with redundant entries), the row must still land in
+        # that team's bucket *once*, not twice — otherwise the team's
+        # throughput is inflated for malformed upstream data.
+        seen: set = set()
+        team_names: List[str] = []
+        for t in extractor(row):
+            if not isinstance(t, str) or not t:
+                continue
+            if t in seen:
+                continue
+            seen.add(t)
+            team_names.append(t)
         if not team_names:
             team_names = [NO_TEAM]
         if NO_TEAM in team_names:
             no_team_count += 1
-        # An issue with two or more *distinct* teams is counted in each —
+        # An issue with two or more distinct teams is counted in each —
         # the "K issues belong to multiple teams" tally the spec asks
-        # for. Duplicate team names in a single row's extractor output
-        # don't multiply the count.
-        if len(set(team_names)) > 1:
+        # for. Post-dedupe so a redundant-entries fixture doesn't
+        # inflate K either.
+        if len(team_names) > 1:
             double_counted += 1
         for name in team_names:
             buckets.setdefault(name, []).append(row)
@@ -271,12 +282,16 @@ def compose_program_scope_jql(
     # parenthesization helper. Imported above; called below.
     if not isinstance(team_field_id, str) or not team_field_id:
         raise ValueError("team_field_id must be a non-empty string")
-    if not team_ids:
+    # Materialise so emptiness can be tested even if a generator was
+    # passed — ``bool(iter([]))`` is True and would slip past a naive
+    # truthiness gate, silently producing the malformed JQL ``"f" in ()``.
+    team_ids_list = list(team_ids)
+    if not team_ids_list:
         raise ValueError(
             "compose_program_scope_jql: team_ids must contain at least one id; "
             "an empty IN () clause is rejected by Jira"
         )
-    rendered = ", ".join(_format_team_id_for_jql(tid) for tid in team_ids)
+    rendered = ", ".join(_format_team_id_for_jql(tid) for tid in team_ids_list)
     scope_clause = '"{}" in ({})'.format(team_field_id, rendered)
     return compose_jql(scope_clause, user_clause, order_by_key=True)
 
