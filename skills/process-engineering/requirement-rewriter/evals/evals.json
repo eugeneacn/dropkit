@@ -1,0 +1,57 @@
+{
+  "skill_name": "requirement-rewriter",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Parent Business Process: Required Minimum Distribution Processing — end-to-end process for identifying participants approaching RMD eligibility, calculating required amounts, and initiating disbursements. Parent Sub-Process: RMD Calculation — calculates the required minimum distribution amount for each eligible participant. Ubiquitous Language document provided (defines: participant, RMD, plan balance, applicable divisor). Requirement to evaluate: 'The system will query the database to retrieve the participant's plan balance and divisor, then compute and store the RMD amount in the calculation table.'",
+      "expected_output": "Report flagging two violations: (1) Tag 1 — Describes HOW not WHAT — the phrases 'query the database', 'retrieve', 'compute and store', and 'calculation table' describe implementation mechanisms; (2) Tag 4 — Contains design details — 'database', 'calculation table' are data structure references belonging at the Capability/Feature level. Proposed rewrite removes all system internals and expresses the business outcome: something like 'Participant RMD amount must be calculated using the current plan balance and applicable divisor.' One-sentence diagnosis per violation naming the triggering phrase. No invented specificity.",
+      "assertions": [
+        "Tag 1 (Describes HOW not WHAT) is identified",
+        "Tag 4 (Contains design details) is identified",
+        "Each violation has a one-sentence diagnosis naming a specific triggering phrase",
+        "Proposed rewrite contains no database, system, or technology references",
+        "Proposed rewrite uses 'participant' (UL doc term) not a synonym",
+        "Proposed rewrite uses a standard modal verb (must/shall/should/may/will)",
+        "No additional violations invented beyond what is actually present"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Parent Business Process: Required Minimum Distribution Processing. Parent Sub-Process: Participant Engagement — notifies participants of their RMD obligation and collects required elections. Ubiquitous Language document provided. Requirement to evaluate: 'As a participant, I want to receive my RMD notification so that I can make my disbursement election before the deadline.'",
+      "expected_output": "Report flagging Tag 3 (Uses Agile user-story format) before any rewrite is proposed. The diagnosis must explicitly name the 'As a participant, I want... so that...' structure as reserved for Capabilities and Features. Proposed rewrite converts to a BPR using an EARS-inspired pattern, e.g.: 'When a participant becomes RMD-eligible, RMD educational notification must be delivered via the participant's e-delivery preference before [deadline — to be confirmed with stakeholders].' Residual question about the specific deadline. Format violation flagged first — not silently skipped.",
+      "assertions": [
+        "Tag 3 (Uses Agile user-story format) is flagged explicitly",
+        "Diagnosis names the 'As a participant, I want' structure as the triggering pattern",
+        "Diagnosis states that this format is reserved for Capabilities and Features, not BPRs",
+        "Proposed rewrite does NOT use the user-story format",
+        "Proposed rewrite uses a standard modal verb",
+        "If a deadline placeholder is needed, it appears as [placeholder] not an invented value",
+        "Rewrite is presented AFTER the violation diagnosis, not before"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Parent Business Process: Required Minimum Distribution Processing. Parent Sub-Process: Spousal Waiver Collection — collects and validates spousal consent waivers before disbursement proceeds. Ubiquitous Language document provided. Requirements to evaluate: (1) 'While a spousal waiver is pending, the RMD disbursement must not proceed to the disbursement sub-process.' (2) 'If the spousal waiver form is not received within 30 days, the participant must be notified by the VS Business Lead.'",
+      "expected_output": "Both requirements receive COMPLIANT status with no proposed rewrites. No phantom improvements, no style edits, no added words. Requirement 1 is a valid EARS State-driven pattern. Requirement 2 is a valid EARS Unwanted-behavior pattern. The summary line shows 2 requirements reviewed, 2 compliant.",
+      "assertions": [
+        "Both requirements are marked COMPLIANT — no changes required",
+        "No violation tags are applied to either requirement",
+        "No rewrite is proposed for either requirement",
+        "Summary line shows 2 compliant, 0 violations",
+        "No phantom style improvements are suggested"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Parent Business Process: Required Minimum Distribution Processing. Parent Sub-Process: RMD Calculation — calculates the required minimum distribution amount. Ubiquitous Language document provided. Requirement to evaluate: 'When the participant submits a cancel-in-flight RMD request, the in-progress RMD transaction must be halted and funds returned to the participant account.'",
+      "expected_output": "Report flagging Tag 9 (Wrong parent) — the cancellation scenario describes an activity that is out of scope for the RMD Calculation sub-process, which handles calculation not cancellation. The diagnosis must name 'cancel-in-flight RMD request' and 'halted' as signals that this describes a cancellation flow that no current sub-process covers. Suggestion to consider running process-cohesion-decomposition (A4 Job 2) to check whether a cancellation sub-process needs to be added.",
+      "assertions": [
+        "Tag 9 (Wrong parent) is flagged",
+        "Diagnosis names the 'cancel-in-flight' activity as out of scope for RMD Calculation",
+        "Output suggests the requirement may belong under a different or missing sub-process",
+        "Output references the possibility of running A4-Job2 to check process cohesion",
+        "No rewrite is proposed that forces the requirement to stay under RMD Calculation"
+      ]
+    }
+  ]
+}
