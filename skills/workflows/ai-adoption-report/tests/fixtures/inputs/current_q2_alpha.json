@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "caller": "test-account",
+    "scope": {"project": "ALPHA"},
+    "window": {"from": "2026-04-01", "to": "2026-06-30"},
+    "state_config_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "issuetype_config_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "schema_version": "1.0",
+    "generated_at": "2026-07-02T08:00:00Z"
+  },
+  "aggregates": {
+    "throughput": 100,
+    "wip": 12,
+    "flow_load": 6.0,
+    "cycle_time_hours": {"p50": 32.0, "p75": 48.0, "p90": 80.0, "n": 100},
+    "rework_rate": 0.10,
+    "defect_ratio": 0.18
+  }
+}

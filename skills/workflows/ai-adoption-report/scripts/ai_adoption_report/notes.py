@@ -67,42 +67,56 @@ class Note:
         return "mixed-major-schema-versions: " + ", ".join(parts)
 
     # ------------------------------------------------------------------
-    # T3 — baseline-mode stubs (filled when T3 lands)
+    # T3 — baseline-mode + cohort-mode
     # ------------------------------------------------------------------
     @classmethod
-    def config_sha_drift(cls, *args, **kwargs) -> str:
-        """TODO(T3): spec lines 163-164. Literal form:
-        ``"config-sha-drift: state_config_sha <a> -> <b>"`` (similarly
-        for ``issuetype_config_sha``). Decide on one method per SHA
-        kind or a single method taking the SHA name as a parameter
-        when T3 wires it up."""
-        raise NotImplementedError("Note.config_sha_drift is a T3 stub")
+    def config_sha_drift(cls, sha_name: str, a: str, b: str) -> str:
+        """Spec line 163: ``"config-sha-drift: <sha_name> <a> → <b>"``.
+
+        ``sha_name`` is ``"state_config_sha"`` or ``"issuetype_config_sha"``;
+        the spec gives both variants under one rule.
+        """
+        return "config-sha-drift: {} {} → {}".format(sha_name, a, b)
 
     @classmethod
-    def cohort_jql_mismatch(cls, *args, **kwargs) -> str:
-        """TODO(T3): spec lines 173-175. Literal form:
-        ``"cohort-jql-mismatch: <baseline-jql> vs <current-jql>; cohort
-        breakdown comparison omitted"``."""
-        raise NotImplementedError("Note.cohort_jql_mismatch is a T3 stub")
-
-    @classmethod
-    def cohort_breakdown_missing_in_baseline(cls, *args, **kwargs) -> str:
-        """TODO(T3): spec lines 167-172. When ``--include-cohort-breakdown``
-        is set in baseline mode but at least one input lacks
-        ``cohort_breakdown``, the flag no-ops with a notes entry. Spec
-        does not pin the wording verbatim; T3 picks one and adds the
-        literal string here."""
-        raise NotImplementedError(
-            "Note.cohort_breakdown_missing_in_baseline is a T3 stub"
+    def cohort_jql_mismatch(cls, a_jql: str, b_jql: str) -> str:
+        """Spec lines 173-175: ``"cohort-jql-mismatch: <baseline-jql>
+        vs <current-jql>; cohort breakdown comparison omitted"``."""
+        return (
+            "cohort-jql-mismatch: {} vs {}; cohort breakdown comparison "
+            "omitted".format(a_jql, b_jql)
         )
 
     @classmethod
-    def per_team_ignored_in_baseline(cls, *args, **kwargs) -> str:
-        """TODO(T3): spec lines 180-182. Literal form:
-        ``"per_team data present in <file>; ignored in baseline mode
-        (use program mode for multi-team rollup)"``."""
-        raise NotImplementedError(
-            "Note.per_team_ignored_in_baseline is a T3 stub"
+    def cohort_breakdown_absent_noop(cls, basenames: Iterable[str]) -> str:
+        """Spec lines 167-172. ``--include-cohort-breakdown`` set in
+        baseline mode but at least one input lacks ``cohort_breakdown``;
+        the flag no-ops.
+
+        Spec does not pin the wording verbatim. Literal form chosen by T3
+        (spec reviewers should bless or amend):
+        ``"cohort-breakdown-absent: cohort_breakdown missing from
+        <comma-sep basenames sorted codepoint-ascending>;
+        --include-cohort-breakdown no-op"``.
+        """
+        names = sorted(set(str(b) for b in basenames))
+        if not names:
+            raise ValueError(
+                "Note.cohort_breakdown_absent_noop requires >=1 basename"
+            )
+        return (
+            "cohort-breakdown-absent: cohort_breakdown missing from {}; "
+            "--include-cohort-breakdown no-op".format(", ".join(names))
+        )
+
+    @classmethod
+    def per_team_ignored_in_baseline(cls, basename: str) -> str:
+        """Spec lines 180-182: ``"per_team data present in <file>;
+        ignored in baseline mode (use program mode for multi-team
+        rollup)"``."""
+        return (
+            "per_team data present in {}; ignored in baseline mode "
+            "(use program mode for multi-team rollup)".format(basename)
         )
 
     # ------------------------------------------------------------------

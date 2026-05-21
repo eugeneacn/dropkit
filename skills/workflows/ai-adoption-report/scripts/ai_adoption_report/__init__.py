@@ -287,15 +287,29 @@ def validate_args(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Subcommand stubs. Later tasks replace these with real implementations.
+# Subcommand dispatch. baseline + cohort delegate to T3's modes module;
+# program is still stubbed for T4/T6.
 # ---------------------------------------------------------------------------
 def _run_baseline(args: argparse.Namespace) -> int:
-    print("not yet implemented")
+    # Local import to avoid a module-load cycle: modes.py imports
+    # ValidationError from this package.
+    from .modes import run_baseline
+
+    report = run_baseline(args)
+    # TODO(T7/T8): replace repr() with the Markdown renderer + atomic
+    # write path. T3 returns ReportData; the print is only here so the
+    # CLI smoke-test surfaces non-empty output until T7 lands.
+    print(repr(report))
     return EXIT_OK
 
 
 def _run_cohort(args: argparse.Namespace) -> int:
-    print("not yet implemented")
+    from .modes import run_cohort
+
+    report = run_cohort(args)
+    # TODO(T7/T8): replace repr() with the Markdown renderer + atomic
+    # write path.
+    print(repr(report))
     return EXIT_OK
 
 
@@ -316,10 +330,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     try:
         validate_args(args)
+        return _DISPATCH[args.mode](args)
     except ValidationError as e:
         print("error: {}".format(e), file=sys.stderr)
         return EXIT_VALIDATION
-    return _DISPATCH[args.mode](args)
 
 
 if __name__ == "__main__":

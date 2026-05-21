@@ -339,18 +339,15 @@ def test_validation_error_exits_2_before_any_file_read(tmp_path, monkeypatch):
     assert "--baseline:" in err
 
 
-def test_stub_subcommand_returns_zero(tmp_path, monkeypatch):
-    """With every flag valid and every path inside CWD, T1 stubs exit 0.
-
-    The body just prints "not yet implemented" — later tasks replace each
-    stub with the real implementation, but the harness wiring is settled
-    in T1.
-    """
+def test_baseline_stub_replaced_by_t3(tmp_path, monkeypatch):
+    """T3 replaced the baseline stub. Path-safety still runs first, so
+    pointing at non-existent files now surfaces the T2 read-failure path
+    (exit 2) rather than the old "not yet implemented" stub."""
     monkeypatch.chdir(tmp_path)
     b, c, o = _ok_paths(tmp_path)
     rc, out, _ = _run(["baseline", "--baseline", b, "--current", c, "--output", o])
-    assert rc == 0
-    assert "not yet implemented" in out
+    assert rc == 2
+    assert "not yet implemented" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -438,15 +435,16 @@ def test_format_unknown_value_exits_2(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # Subcommand stubs exit 0 with all three modes wired
 # ---------------------------------------------------------------------------
-def test_stub_cohort_returns_zero(tmp_path, monkeypatch):
+def test_cohort_stub_replaced_by_t3(tmp_path, monkeypatch):
+    """T3 replaced the cohort stub; non-existent --input now exits 2."""
     monkeypatch.chdir(tmp_path)
     rc, out, _ = _run([
         "cohort",
         "--input", str(tmp_path / "in.json"),
         "--output", str(tmp_path / "out.md"),
     ])
-    assert rc == 0
-    assert "not yet implemented" in out
+    assert rc == 2
+    assert "not yet implemented" not in out
 
 
 def test_stub_program_returns_zero(tmp_path, monkeypatch):

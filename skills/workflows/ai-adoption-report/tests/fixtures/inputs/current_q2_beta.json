@@ -1,0 +1,14 @@
+{
+  "meta": {
+    "caller": "test-account",
+    "scope": {"project": "BETA"},
+    "window": {"from": "2026-04-01", "to": "2026-06-30"},
+    "state_config_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "issuetype_config_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "schema_version": "1.0",
+    "generated_at": "2026-07-02T08:00:00Z"
+  },
+  "aggregates": {
+    "throughput": 100
+  }
+}
