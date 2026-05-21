@@ -120,33 +120,130 @@ class Note:
         )
 
     # ------------------------------------------------------------------
-    # T4 — program-mode stubs
+    # T4 — program-mode input discovery, dedupe, overlap, per_team
     # ------------------------------------------------------------------
     @classmethod
-    def per_team_cohort_deferred(cls, *args, **kwargs) -> str:
-        """TODO(T4): spec lines 241-244. Literal form:
+    def per_team_cohort_deferred(cls, n_rows: int) -> str:
+        """Spec lines 241-244. Literal form:
         ``"per_team-cohort-deferred: N flattened per-team rows have no
-        cohort_breakdown; excluded from cohort rollup"``."""
-        raise NotImplementedError("Note.per_team_cohort_deferred is a T4 stub")
+        cohort_breakdown; excluded from cohort rollup"``.
+
+        T4 emits this only when ``--include-cohort-breakdown`` is set
+        and at least one per_team-flattened row exists (n_rows > 0).
+        ``n_rows`` is the count of ``from_per_team=True`` rows in
+        :class:`ProgramInputs.scopes`.
+        """
+        return (
+            "per_team-cohort-deferred: {} flattened per-team rows have no "
+            "cohort_breakdown; excluded from cohort rollup".format(n_rows)
+        )
 
     @classmethod
-    def per_team_double_counted(cls, *args, **kwargs) -> str:
-        """TODO(T4): spec lines 246-250. Literal form:
+    def per_team_double_counted(cls, basenames: Iterable[str]) -> str:
+        """Spec lines 246-250. Literal form:
         ``"per_team-double-counted: <comma-separated input basenames
         whose meta.per_team_double_counted is true, sorted
         codepoint-ascending>; flattened per-team rows may double-count
         issues that span multiple teams"`` (one entry covering all such
-        inputs)."""
-        raise NotImplementedError("Note.per_team_double_counted is a T4 stub")
+        inputs).
+
+        ``basenames`` need not be pre-sorted; the factory sorts
+        codepoint-ascending so callers can pass any iterable.
+        """
+        sorted_names = sorted(set(basenames))
+        if not sorted_names:
+            raise ValueError(
+                "Note.per_team_double_counted requires at least one basename"
+            )
+        return (
+            "per_team-double-counted: {}; flattened per-team rows may "
+            "double-count issues that span multiple teams".format(
+                ", ".join(sorted_names)
+            )
+        )
 
     @classmethod
-    def duplicate_scope(cls, *args, **kwargs) -> str:
-        """TODO(T4): spec lines 222-225. Literal form:
+    def duplicate_scope(
+        cls,
+        scope: dict,
+        sources: Iterable[Tuple[str, bool]],
+    ) -> str:
+        """Spec lines 222-225. Literal form:
         ``"duplicate scope in input set: <scope dict> in <basename-a>
-        and <basename-b>"``. Exits 2; the report never emits this as a
-        soft note, but the wording lives here so the error message is
-        a single source of truth."""
-        raise NotImplementedError("Note.duplicate_scope is a T4 stub")
+        and <basename-b>"``.
+
+        Exits 2; the report never emits this as a soft note, but the
+        wording lives here so the error message has a single source of
+        truth.
+
+        ``sources`` is an iterable of ``(basename, from_per_team)``
+        tuples. ``from_per_team=True`` basenames are annotated with
+        ``" (per_team flattened)"`` to distinguish a post-flatten
+        collision (plan lines 287-301) from a pre-flatten duplicate of
+        two explicit inputs. The annotation deliberately omits the
+        source's parent kind (program/portfolio/project+team) because
+        the per_team flattening path admits all three; the source's
+        identity is the basename, which is already in the message.
+
+        The factory sorts sources by basename codepoint-ascending; if
+        more than two are present, every basename is listed.
+        ``<scope dict>`` is rendered with keys sorted so the message is
+        stable across Python dict-order accidents.
+        """
+        items = sorted(sources, key=lambda s: s[0])
+        if len(items) < 2:
+            raise ValueError(
+                "Note.duplicate_scope requires at least two sources; got {}".format(
+                    items
+                )
+            )
+        labels = [
+            "{} (per_team flattened)".format(b) if from_per_team else b
+            for b, from_per_team in items
+        ]
+        if len(labels) == 2:
+            joined = "{} and {}".format(labels[0], labels[1])
+        else:
+            joined = "{}, and {}".format(", ".join(labels[:-1]), labels[-1])
+        sorted_scope = {k: scope[k] for k in sorted(scope)}
+        return "duplicate scope in input set: {} in {}".format(
+            sorted_scope, joined
+        )
+
+    @classmethod
+    def overlapping_scopes(
+        cls,
+        pairs: Iterable[Tuple[Tuple[dict, str], Tuple[dict, str]]],
+    ) -> str:
+        """Spec lines 210-228. The spec pins the *behaviour* ("exit 2
+        listing the overlapping scopes") but not a verbatim wording. T4
+        introduces this literal form so the error is a single source of
+        truth across the overlap rules:
+
+        ``"overlapping scopes in input set: <a-basename> (<a-scope>) "
+        "overlaps <b-basename> (<b-scope>); ..."``
+
+        ``pairs`` is an iterable of ``((scope_a, basename_a),
+        (scope_b, basename_b))`` tuples. Multiple overlaps are joined
+        with ``"; "`` so a single error names every offending pair.
+        """
+        items = list(pairs)
+        if not items:
+            raise ValueError(
+                "Note.overlapping_scopes requires at least one pair"
+            )
+
+        def _pair_str(pair):
+            (scope_a, basename_a), (scope_b, basename_b) = pair
+            sa = {k: scope_a[k] for k in sorted(scope_a)}
+            sb = {k: scope_b[k] for k in sorted(scope_b)}
+            return "{} ({}) overlaps {} ({})".format(
+                basename_a, sa, basename_b, sb
+            )
+
+        return "overlapping scopes in input set: " + "; ".join(
+            _pair_str(p) for p in items
+        )
 
     # ------------------------------------------------------------------
     # T5 — delta math (compute_deltas note factories)

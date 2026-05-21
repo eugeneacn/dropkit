@@ -327,14 +327,11 @@ def test_note_factory_rejects_single_major():
         {"project": "P", "program_id": 42},               # program_id + project
         {"project": "P", "portfolio_id": "9"},            # portfolio_id + project
         {"program_id": "42", "portfolio_id": "9"},        # both Align ids
-        {"program_id": "42", "team": "Foo"},              # program + team
-        {"portfolio_id": "7", "team": "Foo"},             # portfolio + team
         {},                                               # empty
     ],
     ids=[
         "team_alone", "project_plus_program", "project_plus_portfolio",
-        "program_plus_portfolio", "program_plus_team", "portfolio_plus_team",
-        "empty",
+        "program_plus_portfolio", "empty",
     ],
 )
 def test_unrecognised_scope_shape_exits_2(tmp_path, bad_scope):
@@ -379,8 +376,15 @@ def test_scope_wrong_type_exits_2(tmp_path, bad_scope):
         ({"program_id": "42"}, "program"),
         ({"project": "ALPHA"}, "project"),
         ({"project": "ALPHA", "team": "Foo"}, "project+team"),
+        # Synthesized-only kinds produced by T4's per_team flattening of
+        # program- or portfolio-scope inputs. Not emitted by flow-metrics
+        # directly; inference must accept them so T4 can re-infer on the
+        # synthesised dict (see T4 prompt §"What to build").
+        ({"program_id": "42", "team": "Foo"}, "program+team"),
+        ({"portfolio_id": "7", "team": "Foo"}, "portfolio+team"),
     ],
-    ids=["portfolio", "program", "project", "project_team"],
+    ids=["portfolio", "program", "project", "project_team",
+         "program_team", "portfolio_team"],
 )
 def test_scope_kind_inferred_correctly(scope, expected):
     assert infer_scope_kind(scope, basename="x.json") == expected

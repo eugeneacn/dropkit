@@ -73,11 +73,22 @@ class InputFile:
 # Scope-kind inference (spec lines 130-146).
 # ---------------------------------------------------------------------------
 def infer_scope_kind(scope: dict, *, basename: str) -> str:
-    """Return ``portfolio`` / ``program`` / ``project`` / ``project+team``.
+    """Return one of the six recognised scope kinds.
 
-    Implements the spec's inference table. Anything outside the table
-    (including ``program_id`` + ``project`` combinations, bare
-    ``{"team": ...}``, or empty dicts) raises :class:`ValidationError`.
+    Spec-pinned kinds (spec lines 130-146):
+    ``portfolio`` / ``program`` / ``project`` / ``project+team``.
+
+    Synthesized-only kinds (introduced by T4's per_team flattening of a
+    program- or portfolio-scope input; flagged for spec amendment):
+    ``program+team`` / ``portfolio+team``. These are not produced by
+    `flow-metrics` directly — they only arise when T4 synthesises a
+    scope dict by carrying forward the source input's
+    ``program_id`` / ``portfolio_id`` and attaching a ``team`` value
+    from a ``per_team`` entry. Accepting them here keeps inference in
+    one place; the alternative (a special-case path in T4) was rejected
+    so that T4 can re-infer the kind on the synthesised dict.
+
+    Anything outside the table raises :class:`ValidationError`.
 
     ``basename`` is woven into the error message so the user can tell
     which file in a program-mode glob is offending without re-running.
@@ -94,10 +105,10 @@ def infer_scope_kind(scope: dict, *, basename: str) -> str:
     has_project = "project" in scope
     has_team = "team" in scope
 
-    if has_portfolio and not (has_program or has_project or has_team):
-        return "portfolio"
-    if has_program and not (has_portfolio or has_project or has_team):
-        return "program"
+    if has_portfolio and not (has_program or has_project):
+        return "portfolio+team" if has_team else "portfolio"
+    if has_program and not (has_portfolio or has_project):
+        return "program+team" if has_team else "program"
     if has_project and not (has_portfolio or has_program):
         return "project+team" if has_team else "project"
 
