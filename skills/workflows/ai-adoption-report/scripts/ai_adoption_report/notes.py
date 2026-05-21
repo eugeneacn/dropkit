@@ -246,6 +246,149 @@ class Note:
         )
 
     # ------------------------------------------------------------------
+    # T6 — program-mode aggregation
+    # ------------------------------------------------------------------
+    @classmethod
+    def aggregation_zero_denominator(cls, metric: str, side: str) -> str:
+        """Spec lines 377-379. The spec pins the *behaviour* ("zero
+        denominator → cell rendered as em-dash + notes entry") but does
+        NOT pin the literal note wording. T6 introduces this literal
+        form; spec reviewers should bless or amend.
+
+        Literal form (T6-introduced, not spec-pinned):
+        ``"aggregation-zero-denominator: <metric>; weighted-average
+        undefined (total weight is zero on <side>)"``.
+
+        ``side`` is one of ``"non-cohort"`` / ``"cohort"`` / ``"control"``
+        — the rollup side whose denominator collapsed to zero. T6 fills
+        in the side label at the call site.
+        """
+        return (
+            "aggregation-zero-denominator: {}; weighted-average undefined "
+            "(total weight is zero on {})".format(metric, side)
+        )
+
+    @classmethod
+    def median_of_medians_approximation(cls) -> str:
+        """Spec lines 381-384. The spec pins the *behaviour* ("a notes
+        entry on program-mode reports records this and points users to
+        per-scope rows for honest distribution inspection") but NOT a
+        verbatim wording. T6 introduces this literal form; spec
+        reviewers should bless or amend.
+
+        Literal form (T6-introduced, not spec-pinned):
+        ``"median-of-medians-approximation: distribution aggregates
+        (cycle_time/lead_time/flow_time/flow_efficiency) computed as
+        median-of-medians across scopes; see per-scope rows for
+        distribution detail"``. One note per report, not per metric.
+        """
+        return (
+            "median-of-medians-approximation: distribution aggregates "
+            "(cycle_time/lead_time/flow_time/flow_efficiency) computed as "
+            "median-of-medians across scopes; see per-scope rows for "
+            "distribution detail"
+        )
+
+    @classmethod
+    def cohort_breakdown_missing(
+        cls,
+        missing_basenames: Iterable[str],
+        total: int,
+    ) -> str:
+        """Spec lines 302-304. Literal form:
+        ``"cohort-breakdown-missing: N of M scopes (basenames: a.json,
+        b.json); cohort rollup computed over the remaining M-N"``.
+
+        ``missing_basenames`` is the set of source basenames whose scopes
+        had no ``cohort_breakdown`` block. ``total`` is the number of
+        scopes considered (M). Basenames are sorted codepoint-ascending
+        and deduplicated (a single source basename may have produced
+        multiple per_team-flattened scopes; we list it once).
+        """
+        names = sorted(set(str(b) for b in missing_basenames))
+        if not names:
+            raise ValueError(
+                "Note.cohort_breakdown_missing requires >=1 basename"
+            )
+        n = len(names)
+        remaining = total - n
+        return (
+            "cohort-breakdown-missing: {} of {} scopes (basenames: {}); "
+            "cohort rollup computed over the remaining {}".format(
+                n, total, ", ".join(names), remaining
+            )
+        )
+
+    @classmethod
+    def cohort_breakdown_section_empty(cls) -> str:
+        """Spec line 310. Literal form: ``"cohort-breakdown-section-empty"``."""
+        return "cohort-breakdown-section-empty"
+
+    @classmethod
+    def cohort_flow_distribution_missing(
+        cls,
+        side: str,
+        missing_basenames: Iterable[str],
+        total: int,
+    ) -> str:
+        """Spec lines 289-294. Literal form:
+        ``"cohort-flow_distribution-missing: side=<cohort|control>
+        dropped N of M scopes (basenames: a.json, b.json); defect_ratio
+        and flow_distribution rollups computed over the remaining M-N"``.
+
+        Basenames sorted codepoint-ascending and deduplicated.
+        """
+        names = sorted(set(str(b) for b in missing_basenames))
+        if not names:
+            raise ValueError(
+                "Note.cohort_flow_distribution_missing requires >=1 basename"
+            )
+        n = len(names)
+        remaining = total - n
+        return (
+            "cohort-flow_distribution-missing: side={} dropped {} of {} "
+            "scopes (basenames: {}); defect_ratio and flow_distribution "
+            "rollups computed over the remaining {}".format(
+                side, n, total, ", ".join(names), remaining
+            )
+        )
+
+    @classmethod
+    def mixed_cohort_jql(
+        cls,
+        jqls_and_basenames: Iterable[Tuple[str, Iterable[str]]],
+    ) -> str:
+        """Spec lines 305-308. Literal form:
+        ``"mixed-cohort-jql: <list of distinct JQLs and their input
+        basenames>; rollup proceeds but cohort definitions differ across
+        scopes"``.
+
+        ``jqls_and_basenames`` is an iterable of ``(jql,
+        list_of_basenames)`` pairs. Distinct JQLs are sorted
+        codepoint-ascending; the basenames within each group are also
+        sorted codepoint-ascending. Each entry renders as ``"<jql>
+        (<basename>, <basename>)"`` joined by ``"; "``.
+        """
+        entries = []
+        for jql, basenames in jqls_and_basenames:
+            names = sorted(set(str(b) for b in basenames))
+            entries.append((str(jql), names))
+        if len(entries) < 2:
+            raise ValueError(
+                "Note.mixed_cohort_jql requires >=2 distinct JQLs; got {}".format(
+                    [e[0] for e in entries]
+                )
+            )
+        entries.sort(key=lambda kv: kv[0])
+        parts = [
+            "{} ({})".format(jql, ", ".join(names)) for jql, names in entries
+        ]
+        return (
+            "mixed-cohort-jql: " + "; ".join(parts) + "; rollup proceeds but "
+            "cohort definitions differ across scopes"
+        )
+
+    # ------------------------------------------------------------------
     # T5 — delta math (compute_deltas note factories)
     # ------------------------------------------------------------------
     @classmethod

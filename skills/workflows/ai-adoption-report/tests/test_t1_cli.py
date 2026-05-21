@@ -448,6 +448,10 @@ def test_cohort_stub_replaced_by_t3(tmp_path, monkeypatch):
 
 
 def test_stub_program_returns_zero(tmp_path, monkeypatch):
+    """T6 wired ``run_program`` into the program subcommand. With no
+    inputs directory, the run exits 2 (no inputs matched window) — the
+    stub's "not yet implemented" message is gone.
+    """
     monkeypatch.chdir(tmp_path)
     rc, out, _ = _run([
         "program",
@@ -455,8 +459,8 @@ def test_stub_program_returns_zero(tmp_path, monkeypatch):
         "--window", "2026-01-01..2026-03-31",
         "--output", str(tmp_path / "out.md"),
     ])
-    assert rc == 0
-    assert "not yet implemented" in out
+    assert rc == 2
+    assert "not yet implemented" not in out
 
 
 # ---------------------------------------------------------------------------

@@ -21,10 +21,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional
 
+from datetime import date
+from pathlib import Path
+
 from . import ValidationError
+from .aggregation import aggregate_cohort_side, aggregate_non_cohort
 from .delta import compute_deltas
 from .inputs import InputFile, load_input, collect_mixed_major_note
 from .notes import Note
+from .program_discovery import canonical_scope_repr as _program_scope_repr
+from .program_discovery import discover_inputs
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +82,7 @@ class ReportData:
     deltas: dict
     cohort_deltas: Optional[dict] = None
     per_scope_rows: Optional[list] = None
+    program_aggregates: Optional[dict] = None
     notes: List[str] = field(default_factory=list)
 
 
@@ -274,9 +281,155 @@ def run_cohort(args) -> ReportData:
     )
 
 
+# ---------------------------------------------------------------------------
+# Mode: program (T4 + T6)
+# ---------------------------------------------------------------------------
+def run_program(args) -> ReportData:
+    """Run program mode end-to-end and return :class:`ReportData`.
+
+    ``args`` is the argparse namespace from the ``program`` subparser.
+    Expects ``args.inputs`` (directory), ``args.window`` (the
+    ``(from, to)`` tuple from :func:`parse_window_flag`), and
+    ``args.include_cohort_breakdown``.
+
+    Pipeline:
+
+    1. T4: ``discover_inputs`` — glob, validate, dedupe, overlap-check,
+       per_team flatten.
+    2. T6: ``aggregate_non_cohort`` — program-wide aggregates.
+    3. T6: ``aggregate_cohort_side`` (twice) when
+       ``--include-cohort-breakdown`` — cohort and control side
+       rollups, computed independently per spec lines 252-311.
+    4. T5: ``compute_deltas`` ONCE — only for the cohort-vs-control
+       rollup comparison. Program mode's main table is per-scope rows
+       + aggregate row, NOT a two-side comparison, so the global
+       ``deltas`` block stays empty.
+    5. Mixed-cohort-jql note: emitted when contributing cohort-rollup
+       scopes carry distinct ``meta.cohort_jql`` values.
+    6. Per-scope rows: every scope in :attr:`ProgramInputs.scopes`,
+       sorted by canonical scope-repr per spec lines 510-513.
+    7. Header line: spec line 439. Kind counting is family-collapsed —
+       ``project+team`` counts as ``project``, ``program+team`` as
+       ``program``, ``portfolio+team`` as ``portfolio``. The spec does
+       not pin this rule; flagged for amendment.
+    """
+    from_endpoint, to_endpoint = args.window
+    program_inputs = discover_inputs(
+        Path(args.inputs),
+        args.window,
+        include_cohort_breakdown=getattr(args, "include_cohort_breakdown", False),
+    )
+
+    notes: List[str] = list(program_inputs.notes)
+
+    global_agg, non_cohort_notes = aggregate_non_cohort(program_inputs.scopes)
+    notes.extend(non_cohort_notes)
+
+    # Spec line 373: throughput is reported as a raw count AND as a
+    # per-week rate. The non-cohort aggregate is the only place this
+    # is computed; cohort-side rollups don't carry a window-normalised
+    # variant (T7's renderer can compute one if it wants).
+    if "throughput" in global_agg:
+        try:
+            d_from = date.fromisoformat(from_endpoint)
+            d_to = date.fromisoformat(to_endpoint)
+            inclusive_days = (d_to - d_from).days + 1
+            weeks = inclusive_days / 7
+            if weeks > 0:
+                global_agg["throughput_per_week"] = (
+                    global_agg["throughput"] / weeks
+                )
+        except ValueError:
+            # Window strings passed validate_args/parse_window_flag, so
+            # this can only fire if a caller constructed a malformed
+            # args namespace. Skip the normalisation rather than mask
+            # the upstream bug.
+            pass
+
+    cohort_deltas: Optional[dict] = None
+    if getattr(args, "include_cohort_breakdown", False):
+        cohort_agg, cohort_notes = aggregate_cohort_side(
+            program_inputs.scopes, "cohort"
+        )
+        control_agg, control_notes = aggregate_cohort_side(
+            program_inputs.scopes, "control"
+        )
+        notes.extend(cohort_notes)
+        notes.extend(control_notes)
+
+        if cohort_agg is not None and control_agg is not None:
+            # Spec lines 305-308: collect cohort_jql across the scopes
+            # that actually contribute (non-per_team, have
+            # cohort_breakdown). Emit the mixed-cohort-jql note when
+            # >1 distinct value.
+            jql_groups: dict = {}
+            for s in program_inputs.scopes:
+                if s.from_per_team or s.cohort_breakdown is None:
+                    continue
+                jql_groups.setdefault(s.cohort_jql, []).append(s.source_basename)
+            if len(jql_groups) > 1:
+                notes.append(
+                    Note.mixed_cohort_jql(
+                        [(str(jql), basenames) for jql, basenames in jql_groups.items()]
+                    )
+                )
+
+            delta_result = compute_deltas(
+                control_agg, cohort_agg, side_labels=("control", "cohort")
+            )
+            notes.extend(delta_result.notes)
+            cohort_deltas = delta_result.to_dict()
+
+    # Per-scope rows: canonical sort by scope-repr (spec lines 506-507).
+    sorted_scopes = sorted(
+        program_inputs.scopes,
+        key=lambda s: _program_scope_repr(s.scope, s.scope_kind),
+    )
+    per_scope_rows = [
+        {
+            "scope": s.scope,
+            "scope_kind": s.scope_kind,
+            "scope_repr": _program_scope_repr(s.scope, s.scope_kind),
+            "aggregates": s.aggregates,
+        }
+        for s in sorted_scopes
+    ]
+
+    # Header line (spec line 439). Kind counts collapse ``+team`` into
+    # the parent family — flagged in the task report.
+    kind_counts = {"project": 0, "program": 0, "portfolio": 0}
+    for s in program_inputs.scopes:
+        family = s.scope_kind.split("+", 1)[0]
+        if family in kind_counts:
+            kind_counts[family] += 1
+    header_line = (
+        "**Window:** {f}..{t} | **Scopes:** {n} "
+        "(project={p}, program={pg}, portfolio={pf})"
+    ).format(
+        f=from_endpoint,
+        t=to_endpoint,
+        n=len(program_inputs.scopes),
+        p=kind_counts["project"],
+        pg=kind_counts["program"],
+        pf=kind_counts["portfolio"],
+    )
+
+    return ReportData(
+        mode="program",
+        header_line=header_line,
+        inputs=program_inputs.source_inputs,
+        deltas={},
+        cohort_deltas=cohort_deltas,
+        per_scope_rows=per_scope_rows,
+        program_aggregates=global_agg,
+        notes=notes,
+    )
+
+
 __all__ = [
     "ReportData",
     "canonical_scope_repr",
     "run_baseline",
     "run_cohort",
+    "run_program",
 ]

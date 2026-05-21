@@ -314,7 +314,13 @@ def _run_cohort(args: argparse.Namespace) -> int:
 
 
 def _run_program(args: argparse.Namespace) -> int:
-    print("not yet implemented")
+    from .modes import run_program
+
+    report = run_program(args)
+    # TODO(T7/T8): replace repr() with the Markdown renderer + atomic
+    # write path. T6 returns ReportData; the print is only here so the
+    # CLI smoke-test surfaces non-empty output until T7 lands.
+    print(repr(report))
     return EXIT_OK
 
 
