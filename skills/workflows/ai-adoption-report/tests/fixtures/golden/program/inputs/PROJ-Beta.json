@@ -1,0 +1,28 @@
+{
+  "meta": {
+    "caller": "test-account",
+    "scope": {"project": "BETA"},
+    "window": {"from": "2025-10-01", "to": "2025-12-31"},
+    "state_config_sha": "1111111111111111111111111111111111111111111111111111111111111111",
+    "issuetype_config_sha": "2222222222222222222222222222222222222222222222222222222222222222",
+    "schema_version": "1.0",
+    "generated_at": "2026-01-02T08:00:00Z"
+  },
+  "aggregates": {
+    "throughput": 64,
+    "wip": 11,
+    "flow_load": 4.0,
+    "cycle_time_hours": {"p50": 28.0, "p75": 44.0, "p90": 72.0, "n": 64},
+    "rework_rate": 0.1,
+    "defect_ratio": 0.12,
+    "flow_distribution": {
+      "feature": 0.65,
+      "defect": 0.12,
+      "debt": 0.1,
+      "risk": 0.03,
+      "subtask": 0.0,
+      "other": 0.1,
+      "denominator": 76
+    }
+  }
+}

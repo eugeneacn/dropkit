@@ -348,7 +348,16 @@ def _build_summary(report: ReportData) -> str:
             "{} comparison; see Metric deltas table and Notes for "
             "detail.".format(report.mode.capitalize())
         )
-    return ", ".join(pieces) + "."
+    sentence = ", ".join(pieces) + "."
+    # In cohort mode the deltas describe a within-window partition
+    # (cohort side vs control side), not a temporal change. Prefix the
+    # phrase so a reader skimming the report doesn't read "throughput
+    # down 22.2%" as a regression — it's the cohort side being smaller
+    # than control by 22.2%, which is expected when only some tickets
+    # are tagged.
+    if report.mode == "cohort":
+        return "cohort vs control: " + sentence
+    return sentence
 
 
 def _summary_phrase(name: str, pct: float) -> str:

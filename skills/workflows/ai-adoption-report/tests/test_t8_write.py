@@ -93,7 +93,7 @@ def test_sidecar_path_json_extension_raises(tmp_path):
     with pytest.raises(ValidationError) as exc:
         derive_sidecar_path(tmp_path / "report.json")
     msg = str(exc.value)
-    assert "--format both requires the Markdown output path to be named distinctly from .json" in msg
+    assert "--output is treated as the Markdown-shaped path" in msg
     assert "report.json" in msg
 
 
@@ -113,7 +113,7 @@ def test_sidecar_path_uppercase_json_rejected(tmp_path):
     """
     with pytest.raises(ValidationError) as exc:
         derive_sidecar_path(tmp_path / "report.JSON")
-    assert "distinctly from .json" in str(exc.value)
+    assert "--output is treated as the Markdown-shaped path" in str(exc.value)
 
 
 def test_sidecar_path_uppercase_md_maps_to_lowercase_json(tmp_path):
@@ -330,7 +330,7 @@ def test_format_json_with_json_output_exits_2(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     rc, _, err = _run(_baseline_argv(tmp_path, "report.json", "--format", "json"))
     assert rc == 2
-    assert "distinctly from .json" in err
+    assert "--output is treated as the Markdown-shaped path" in err
 
 
 # ---------------------------------------------------------------------------

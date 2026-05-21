@@ -68,8 +68,14 @@ def derive_sidecar_path(markdown_path: Path) -> Path:
     suffix = markdown_path.suffix.lower()
     if suffix == ".json":
         raise ValidationError(
-            "--format both requires the Markdown output path to be named "
-            "distinctly from .json (got {})".format(markdown_path)
+            "--output is treated as the Markdown-shaped path; the JSON "
+            "sidecar is derived from it by replacing .md with .json. A "
+            "path ending in .json would collide with itself (got {}). "
+            "Rename --output to use .md (or no extension) — under "
+            "--format=json the Markdown file is not written, but the "
+            "sidecar still derives from the Markdown-shaped path.".format(
+                markdown_path
+            )
         )
     if suffix == ".md":
         return markdown_path.with_suffix(".json")

@@ -5,7 +5,7 @@
 - **Plan:** [`ai-adoption-report-plan.md`](ai-adoption-report-plan.md) (Approved, terminal-clean)
 - **Constrained by:** [`flow-metrics.md`](flow-metrics.md) (Approved, terminal-clean)
 - **Supersedes:** `ai-adoption-baseline.md`, `ai-adoption-cohort.md`, `ai-value-report.md` (all archived 2026-05-19; see [`archive/README.md`](archive/README.md))
-- **Review history:** 5 adversarial review rounds (2026-05-19). Round 1: 1 blocker / 4 majors / 4 minors / 2 test gaps; round 2: 1 blocker / 2 majors / 1 minor / 1 test gap; round 3: 1 blocker / 1 major / 1 minor (invalid); round 4: 0 blockers / 0 majors / 2 minors; round 5: terminal-clean.
+- **Review history:** 5 adversarial review rounds (2026-05-19). Round 1: 1 blocker / 4 majors / 4 minors / 2 test gaps; round 2: 1 blocker / 2 majors / 1 minor / 1 test gap; round 3: 1 blocker / 1 major / 1 minor (invalid); round 4: 0 blockers / 0 majors / 2 minors; round 5: terminal-clean. T9 packaging review (2026-05-20): 2 blockers (manifest category typo + unused manifest fields) / 1 major (process-spawn surface) / minors all fixed; spec amended to pin per-scope column set, kind-counting collapse rule, and four literal note forms (`cohort-breakdown-absent`, `n-differs`, `median-of-medians-approximation`, `aggregation-zero-denominator`); line-budget gate raised from 800 to 1500 (see §"Acceptance criteria").
 
 > **Spec contract:** this document defines what "done" means for the
 > `ai-adoption-report` workflow skill. The implementing PR must match
@@ -169,7 +169,10 @@ definitions changed.
 (string equality), the Markdown report appends a section comparing
 cohort-vs-control deltas across the two windows. If either input
 lacks `cohort_breakdown`, the flag no-ops silently with a `notes`
-entry. If both have `cohort_breakdown` but `meta.cohort_jql` differs,
+entry of the form `"cohort-breakdown-absent: cohort_breakdown
+missing from <comma-separated basenames, sorted
+codepoint-ascending>; --include-cohort-breakdown no-op"`. If both
+have `cohort_breakdown` but `meta.cohort_jql` differs,
 the section is omitted and a `notes` entry records
 `"cohort-jql-mismatch: <baseline-jql> vs <current-jql>; cohort
 breakdown comparison omitted"`.
@@ -337,9 +340,11 @@ separate row in the Markdown table (e.g. `cycle_time_hours p50`,
 `cycle_time_hours p75`, `cycle_time_hours p90`). The percentile
 columns are independent — no overall "distribution delta." The `n`
 field is reported but not subjected to delta math. A `notes` entry
-records the per-side `n` values when they differ by more than 10%
-(measured as `abs(n_a - n_b) / max(n_a, n_b) > 0.1`; zero on either
-side always triggers the note). In cohort comparisons the rule
+of the form `"n-differs: <metric> n=<n_a> in <a-label>, n=<n_b> in
+<b-label> (>10% delta)"` records the per-side `n` values when they
+differ by more than 10% (measured as `abs(n_a - n_b) / max(n_a, n_b)
+> 0.1`; zero on either side always triggers the note). In cohort
+comparisons the rule
 applies to the (cohort `n`, control `n`) pair per metric; in
 baseline / program-mode aggregate comparisons it applies to the
 (A-side `n`, B-side `n`) pair per metric.
@@ -379,8 +384,19 @@ cell:
 | `flow_distribution` | per-bucket weighted average using each scope's `flow_distribution.denominator` as the weight: `sum(bucket_share[i] * denominator[i]) / sum(denominator[i])`. The aggregated `flow_distribution.denominator` is `sum(denominator[i])` (integer count). Zero total denominator → all bucket cells `—`. |
 
 The "median-of-medians" representation is explicitly an approximation;
-a `notes` entry on program-mode reports records this and points users
-to per-scope rows for honest distribution inspection.
+a single `notes` entry of the form
+`"median-of-medians-approximation: distribution aggregates
+(cycle_time/lead_time/flow_time/flow_efficiency) computed as
+median-of-medians across scopes; see per-scope rows for distribution
+detail"` is emitted once per program-mode report, regardless of how
+many distribution metrics are aggregated.
+
+Zero-denominator collapses (`rework_rate`, `defect_ratio`,
+`flow_distribution`) emit a `notes` entry of the form
+`"aggregation-zero-denominator: <metric>; weighted-average undefined
+(total weight is zero on <side>)"` where `<side>` is one of
+`non-cohort`, `cohort`, or `control` — the rollup side whose
+denominator collapsed.
 
 ### Output: Markdown
 
@@ -400,6 +416,12 @@ Section order fixed. Sections absent for a mode are omitted entirely
 <one-line plain-English summary, e.g. "Throughput up 12%, cycle time p50
 down 18%, rework rate up 4pp over <baseline-window> → <current-window>.">
 
+In cohort mode the summary is prefixed with `cohort vs control: ` to
+signal a within-window partition (not a temporal change) — a reader
+skimming "throughput down 22%" must not misread it as a regression.
+The prefix is part of the pinned wire format; the cohort-mode golden
+test asserts it byte-identically.
+
 ## Metric deltas
 
 | Metric | <A-label> | <B-label> | Δ abs | Δ % |
@@ -410,8 +432,19 @@ down 18%, rework rate up 4pp over <baseline-window> → <current-window>.">
 
 ## Per-scope rows   <!-- program mode only -->
 
-| Scope | throughput | cycle_p50 | rework_rate | ... |
-| ... |
+| Scope | throughput | wip | flow_load | cycle_p50 | lead_p50 | flow_time_p50 | flow_eff_p50 | rework_rate | defect_ratio | fd.feature | fd.defect | fd.debt | fd.risk | fd.subtask | fd.other |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| <scope-repr-row-1> | ... |
+| Aggregate | <program_aggregates row> |
+
+Column set is fixed: every canonical-order scalar metric (`throughput`,
+`wip`, `flow_load`, `rework_rate`, `defect_ratio`) plus each
+distribution metric's `p50` only (`cycle_p50`, `lead_p50`,
+`flow_time_p50`, `flow_eff_p50`), then the six `flow_distribution`
+buckets prefixed `fd.`. p75/p90 are elided from the Markdown table
+(readers wanting full percentile detail use the JSON sidecar's
+`per_scope[].aggregates`). A final `Aggregate` row is appended,
+sourced from the program-wide aggregation pass.
 
 ## Cohort breakdown   <!-- when --include-cohort-breakdown -->
 
@@ -436,7 +469,7 @@ Mode-specific header line:
 
 - **baseline:** `**Baseline window:** <from..to> | **Current window:** <from..to> | **Scope:** <scope-repr>`
 - **cohort:** `**Window:** <from..to> | **Scope:** <scope-repr> | **Cohort JQL:** <jql>`
-- **program:** `**Window:** <from..to> | **Scopes:** <N> (project=<i>, program=<j>, portfolio=<k>)`
+- **program:** `**Window:** <from..to> | **Scopes:** <N> (project=<i>, program=<j>, portfolio=<k>)`. The kind counters collapse family variants into their parent: `project+team` counts toward `project`, `program+team` toward `program`, `portfolio+team` toward `portfolio`. This keeps the header summary stable when `per_team` flattening synthesises team-scoped rows out of a single program/portfolio input.
 
 Markdown rules:
 
@@ -620,7 +653,7 @@ The skill makes no upstream calls. It does not invoke `flow-metrics`,
 - `test_percent_delta_zero_baseline_zero_current_renders_dash`.
 - `test_percent_delta_zero_baseline_positive_current_renders_infinity`.
 - `test_percent_delta_null_either_side_renders_dash`.
-- `test_percent_delta_one_decimal_place_signed`.
+- `test_percent_delta_decimal_fraction_signed` (T5 emits the fraction; T7's `_fmt_percent` round-trip and `test_percent_cell_positive_zero_renders_plus_zero` cover the one-decimal-place signed rendering).
 - `test_distribution_metrics_compared_per_percentile`.
 
 ### Output
@@ -636,7 +669,7 @@ The skill makes no upstream calls. It does not invoke `flow-metrics`,
 - `test_json_sidecar_inputs_sorted_by_basename`.
 - `test_json_sidecar_scope_kind_present_on_inputs`.
 - `test_overwrite_collision_exits_2_without_flag`.
-- `test_overwrite_collision_with_both_format_checks_both_files`.
+- `test_collision_both_format_both_exist_lists_both` (plus `test_collision_both_format_only_md_exists` and `test_collision_both_format_only_json_exists` for the partial-collision variants).
 - `test_format_json_skips_markdown_render`.
 - `test_byte_identical_rerun_modulo_generated_at`.
 
@@ -703,5 +736,11 @@ The skill makes no upstream calls. It does not invoke `flow-metrics`,
   same skill version (modulo `meta.generated_at`, which is the only
   per-run timestamp).
 - All contract tests pass.
-- Spec and plan together fit under 800 lines (this spec + its plan
-  budget). Anything beyond signals creeping scope.
+- Spec and plan together fit under 1500 lines. Original v1 budget was
+  800 lines; raised on 2026-05-20 after T9 packaging found the actual
+  document combined to ~1380 lines without bloat (~56 contract tests
+  pinned, 3 modes × 4 dimensions of math, cohort/control independence
+  rules, JSON canonicalisation). The 800-line signal proved too tight
+  for a multi-mode skill with rigid output contracts; the new 1500
+  cap preserves the creep guardrail while admitting the actual
+  problem size.

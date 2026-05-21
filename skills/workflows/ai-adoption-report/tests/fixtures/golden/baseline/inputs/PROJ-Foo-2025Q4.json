@@ -1,0 +1,30 @@
+{
+  "meta": {
+    "caller": "test-account",
+    "scope": {"project": "PROJ", "team": "Foo"},
+    "window": {"from": "2025-10-01", "to": "2025-12-31"},
+    "state_config_sha": "1111111111111111111111111111111111111111111111111111111111111111",
+    "issuetype_config_sha": "2222222222222222222222222222222222222222222222222222222222222222",
+    "schema_version": "1.0",
+    "generated_at": "2026-01-02T08:00:00Z"
+  },
+  "aggregates": {
+    "throughput": 102,
+    "wip": 16,
+    "flow_load": 6.2,
+    "cycle_time_hours": {"p50": 31.5, "p75": 50.0, "p90": 84.0, "n": 102},
+    "lead_time_hours": {"p50": 78.0, "p75": 140.0, "p90": 264.0, "n": 102},
+    "flow_efficiency": {"p50": 0.48, "p75": 0.62, "p90": 0.74, "n": 102},
+    "rework_rate": 0.16,
+    "defect_ratio": 0.16,
+    "flow_distribution": {
+      "feature": 0.6,
+      "defect": 0.16,
+      "debt": 0.1,
+      "risk": 0.04,
+      "subtask": 0.0,
+      "other": 0.1,
+      "denominator": 114
+    }
+  }
+}
