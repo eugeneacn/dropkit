@@ -10,6 +10,12 @@ This directory holds sample inputs and quickstart artifacts.
 - `processing/` — output of the `split_image.py overview` run during
   the quickstart. Gitignored. Safe to delete; rerunning `quickstart.sh`
   regenerates it.
+- `ai-adoption-report/` — a worked example of the
+  `ai-adoption-report` workflow skill across all three modes
+  (baseline, cohort, program), with hand-curated `flow-metrics`
+  fixtures for a fictional ACME engineering org and the reports they
+  produce. See `ai-adoption-report/README.md` for the narrative
+  walkthrough and the commands to reproduce the outputs.
 
 ## Bring your own
 

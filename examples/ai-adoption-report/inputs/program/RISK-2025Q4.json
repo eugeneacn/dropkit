@@ -1,0 +1,28 @@
+{
+  "meta": {
+    "caller": "demo@acme.example",
+    "scope": {"project": "RISK"},
+    "window": {"from": "2025-10-01", "to": "2025-12-31"},
+    "state_config_sha": "a3f9b2c1d4e5670089abcdef0123456789abcdef0123456789abcdef01234567",
+    "issuetype_config_sha": "b4e8c3d2a5f6710089abcdef0123456789abcdef0123456789abcdef01234568",
+    "schema_version": "1.0",
+    "generated_at": "2026-01-04T08:00:00Z"
+  },
+  "aggregates": {
+    "throughput": 41,
+    "wip": 11,
+    "flow_load": 4.8,
+    "cycle_time_hours": {"p50": 58.0, "p75": 96.0, "p90": 168.0, "n": 41},
+    "rework_rate": 0.24,
+    "defect_ratio": 0.31,
+    "flow_distribution": {
+      "feature": 0.39,
+      "defect": 0.31,
+      "debt": 0.19,
+      "risk": 0.04,
+      "subtask": 0.0,
+      "other": 0.07,
+      "denominator": 47
+    }
+  }
+}

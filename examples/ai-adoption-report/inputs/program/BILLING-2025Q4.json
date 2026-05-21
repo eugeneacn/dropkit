@@ -1,0 +1,28 @@
+{
+  "meta": {
+    "caller": "demo@acme.example",
+    "scope": {"project": "BILLING"},
+    "window": {"from": "2025-10-01", "to": "2025-12-31"},
+    "state_config_sha": "a3f9b2c1d4e5670089abcdef0123456789abcdef0123456789abcdef01234567",
+    "issuetype_config_sha": "b4e8c3d2a5f6710089abcdef0123456789abcdef0123456789abcdef01234568",
+    "schema_version": "1.0",
+    "generated_at": "2026-01-02T08:00:00Z"
+  },
+  "aggregates": {
+    "throughput": 52,
+    "wip": 7,
+    "flow_load": 3.0,
+    "cycle_time_hours": {"p50": 38.0, "p75": 60.0, "p90": 102.0, "n": 52},
+    "rework_rate": 0.09,
+    "defect_ratio": 0.27,
+    "flow_distribution": {
+      "feature": 0.44,
+      "defect": 0.27,
+      "debt": 0.18,
+      "risk": 0.04,
+      "subtask": 0.0,
+      "other": 0.07,
+      "denominator": 60
+    }
+  }
+}

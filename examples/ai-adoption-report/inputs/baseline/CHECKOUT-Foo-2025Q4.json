@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "caller": "demo@acme.example",
+    "scope": {"project": "CHECKOUT", "team": "Foo"},
+    "window": {"from": "2025-10-01", "to": "2025-12-31"},
+    "state_config_sha": "a3f9b2c1d4e5670089abcdef0123456789abcdef0123456789abcdef01234567",
+    "issuetype_config_sha": "b4e8c3d2a5f6710089abcdef0123456789abcdef0123456789abcdef01234568",
+    "schema_version": "1.0",
+    "generated_at": "2026-01-02T08:00:00Z"
+  },
+  "aggregates": {
+    "throughput": 96,
+    "wip": 14,
+    "flow_load": 5.4,
+    "cycle_time_hours": {"p50": 33.0, "p75": 54.0, "p90": 91.0, "n": 96},
+    "lead_time_hours": {"p50": 92.0, "p75": 156.0, "p90": 276.0, "n": 96},
+    "flow_time_hours": {"p50": 68.0, "p75": 112.0, "p90": 198.0, "n": 96},
+    "flow_efficiency": {"p50": 0.46, "p75": 0.58, "p90": 0.71, "n": 96},
+    "rework_rate": 0.17,
+    "defect_ratio": 0.18,
+    "flow_distribution": {
+      "feature": 0.58,
+      "defect": 0.18,
+      "debt": 0.12,
+      "risk": 0.04,
+      "subtask": 0.0,
+      "other": 0.08,
+      "denominator": 106
+    }
+  }
+}
