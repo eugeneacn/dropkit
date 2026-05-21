@@ -1,6 +1,8 @@
 # Do's and Don'ts Linter
 
-Shared rubric used by A1, A2, and A4. Defines the 10 violation tags from the RKT Writing Guide Do's and Don'ts. Apply every check to each requirement being evaluated.
+Shared rubric used by A1, A2, and A4. Defines the 10 violation tags from the requirements writing guide Do's and Don'ts. Apply every check to each requirement being evaluated.
+
+> **Source note:** This rubric is derived from an internal requirements writing guide. The guide is not publicly available; if you are adapting these agents for a different organisation, verify the violation tags and remediation patterns against your own requirements authoring standard before use.
 
 ---
 
@@ -133,18 +135,23 @@ A requirement may have zero, one, or multiple violations. List each separately. 
 
 **Remediation:** Either rewrite as a positive statement of what must happen, or apply the EARS Unwanted-behavior pattern: `If <exception condition>, <business object> must <handling>`.
 
+**Example (violation vs. acceptable):**
+- Violation: *"Participant PII must not be displayed on the confirmation screen."* — bare prohibition; the business intent is unclear.
+- Acceptable (EARS Unwanted-behavior): *"If a participant has opted out of digital display, PII must not be shown on the confirmation screen."* — prohibition is paired with an explicit exception condition.
+- Acceptable (positive rewrite): *"The confirmation screen must mask all participant PII by default."* — states what must happen instead of what must not.
+
 ---
 
 ### Tag 8 — Wrong level
 
-**Definition:** The RKT Writing Guide is explicit about where different requirement types live. Functional requirements belong at the Sub-Process level. Non-functional requirements (Security, Performance, Usability, Availability, DR) belong at the Business Process level.
+**Definition:** The requirements writing guide is explicit about where different requirement types live. Functional requirements belong at the Sub-Process level. Non-functional requirements (Security, Performance, Usability, Availability, DR) belong at the Business Process level.
 
 **Triggering patterns:**
 - NFR language (SLA targets, performance numbers, security classifications, availability percentages) on a Sub-Process page
 - Functional process steps ("participant must submit the form," "plan sponsor must approve the request") on a Business Process page
 
 **Diagnostic template:**
-> "This appears to be a [functional / non-functional] requirement placed at the [sub-process / process] level. Per the RKT Writing Guide, it belongs at the [correct level]."
+> "This appears to be a [functional / non-functional] requirement placed at the [sub-process / process] level. Per the requirements writing guide, it belongs at the [correct level]."
 
 **Remediation:** Move the requirement to the correct level. For NFRs on sub-process pages, escalate to the Business Process page. For functional steps on a Business Process page, allocate to the appropriate sub-process.
 

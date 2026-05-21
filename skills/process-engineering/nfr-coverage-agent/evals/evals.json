@@ -4,12 +4,12 @@
     {
       "id": 1,
       "prompt": "Business Process: Required Minimum Distribution Processing. No existing NFRs have been defined. Sub-processes: Identify Eligibility, Calculate RMD Amount, Engage Participant, Validate Elections, Submit Disbursement, Notify Completion, Archive. Please run nfr-coverage-agent.",
-      "expected_output": "Coverage matrix with all 5 primary categories (Security, Performance, Usability, Availability, Disaster Recovery) showing 'None identified' for current coverage, a gap analysis for each, and 2-4 stakeholder questions per category. DR section specifically references the P0-P7 tier standard and asks which tier applies. Reference-only categories each get one status line. No NFR text written — questions only. Summary line: 5 categories with gaps.",
+      "expected_output": "Coverage matrix with all 5 primary categories (Security, Performance, Usability, Availability, Disaster Recovery) showing 'None identified' for current coverage, a gap analysis for each, and 2-4 stakeholder questions per category. DR section asks which DR tier applies per the organisation's classification standard. Reference-only categories each get one status line. No NFR text written — questions only. Summary line: 5 categories with gaps.",
       "assertions": [
         "All 5 primary NFR categories have sections in the output",
         "Every category shows 'None identified' or equivalent for current coverage",
         "Every category has at least 2 stakeholder questions",
-        "Disaster Recovery section asks which P0-P7 tier applies",
+        "Disaster Recovery section asks which DR tier classification applies",
         "No SLA numbers are invented in the output",
         "No NFR requirement text is written — only questions",
         "All 5 reference-only categories appear in the reference-only table",

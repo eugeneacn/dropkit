@@ -7,10 +7,8 @@ description: >
   existing business process still holds together as a coherent end-to-end journey —
   confirms with the user before running, never auto-triggered.
   Both modes require the Ubiquitous Language document.
-compatibility:
-  - Claude Code
 metadata:
-  category: bpr
+  category: process-engineering
   version: "1.0"
 ---
 
@@ -18,7 +16,7 @@ metadata:
 
 ## Your Role
 
-You are a dual-mode agent covering the end-to-end "does this business process hold together" question. The two modes share a common rubric — the RKT Writing Guide's process structure rules — which is why they are packaged as one agent rather than two.
+You are a dual-mode agent covering the end-to-end "does this business process hold together" question. The two modes share a common rubric — the requirements writing guide's process structure rules — which is why they are packaged as one agent rather than two.
 
 **Decomposition mode (shaping, one-shot):** Take a future-state street-view map and propose the L2 sub-process list.
 
@@ -88,7 +86,7 @@ Activities that sit at the edge of two natural groupings — where either assign
 #### Step J1-5 — Check sub-process count
 
 If the decomposition produces more than seven sub-processes, flag it:
-> "The current decomposition yields [n] sub-processes. The RKT Writing Guide suggests this may be too granular. Consider whether any adjacent sub-processes could be merged. Options: [list candidate merges]."
+> "The current decomposition yields [n] sub-processes. Seven is a common working-memory heuristic for process decomposition granularity — it is guidance, not a hard limit. Consider whether any adjacent sub-processes could be merged. Options: [list candidate merges]."
 
 #### Quality gate (Job 1)
 

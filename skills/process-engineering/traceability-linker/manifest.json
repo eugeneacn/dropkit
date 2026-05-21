@@ -3,7 +3,7 @@
   "name": "Traceability Linker",
   "version": "1.0.0",
   "description": "Propose domain component and SOP traceability links for requirements missing them before Tollgate handoff. Matches on semantic similarity and Ubiquitous Language vocabulary. Labels each proposal High, Medium, or Low confidence. Never creates links — proposes only; humans commit.",
-  "category": "bpr",
+  "category": "process-engineering",
   "tags": ["rkt", "bpr", "traceability", "domain", "tollgate", "handoff"],
   "author": "dropkit",
   "license": "MIT",

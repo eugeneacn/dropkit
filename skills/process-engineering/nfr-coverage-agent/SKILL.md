@@ -3,13 +3,11 @@ name: nfr-coverage-agent
 description: >
   Use before an NFR workshop or Tollgate review to surface coverage gaps in a
   Business Process page's non-functional requirements. Produces a markdown coverage
-  matrix across all RKT NFR categories with gap analysis and targeted stakeholder
+  matrix across all NFR categories with gap analysis and targeted stakeholder
   questions for each missing category. Run per Business Process, a few times per
   epic. Proposes questions only — never writes NFR text.
-compatibility:
-  - Claude Code
 metadata:
-  category: bpr
+  category: process-engineering
   version: "1.0"
 ---
 
@@ -38,7 +36,7 @@ A markdown coverage matrix — one section per NFR category — containing: curr
 | **Performance** | Tech (targets from Business) | Response time, throughput, concurrency, batch processing windows |
 | **Usability** | Business | Accessibility standard (WCAG level), user interface expectations, error message quality |
 | **Availability** | Business + SRE | Uptime SLA target, maintenance window expectations, degraded-mode behaviour |
-| **Disaster Recovery** | Business + SRE | RTO/RPO targets, P0–P7 tier classification, failover expectations |
+| **Disaster Recovery** | Business + SRE | RTO/RPO targets, DR tier classification, failover expectations |
 
 ### Reference-only categories — flag if clearly missing; do not nag
 
@@ -77,7 +75,7 @@ Apply this classifier to each statement to determine its category:
 | Response time, throughput, latency, transactions per second, batch window, concurrency | Performance |
 | Accessibility, WCAG, screen reader, error messages, user interface expectations | Usability |
 | Uptime, availability percentage, maintenance window, degraded mode, SLA | Availability |
-| RTO, RPO, disaster, failover, backup, recovery, P0–P7 tier | Disaster Recovery |
+| RTO, RPO, disaster, failover, backup, recovery, DR tier | Disaster Recovery |
 | MTBF, retry, fault tolerance | Reliability |
 | Volume growth, peak load, scaling | Scalability |
 | Deployment, patch, upgrade frequency | Maintainability |
@@ -95,7 +93,7 @@ For each **primary** NFR category, produce:
 
 **For Disaster Recovery specifically:**
 
-- Always ask which P0–P7 tier this process falls under
+- Always ask which DR tier this process falls under. Substitute your organisation's tier labels in the question if different from the example output below.
 - Do not assume "internal-only" means no DR tier — ask explicitly
 
 For **reference-only categories:** produce one concise line noting the gap if obvious, or "No obvious gap identified." Do not generate a full question list.
@@ -166,9 +164,9 @@ Before producing output:
 
 ### Disaster Recovery
 **Current coverage:** ...
-**Gaps:** No P0–P7 tier assigned.
+**Gaps:** No DR tier assigned.
 **Questions for workshop:**
-1. Which P-tier does this process fall under per the corporate DR standard?
+1. Which DR tier does this process fall under per your organisation's disaster recovery classification standard?
 2. What is the acceptable Recovery Time Objective (RTO) if this process becomes unavailable?
 3. ...
 

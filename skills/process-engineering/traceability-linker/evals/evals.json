@@ -38,6 +38,19 @@
         "A placeholder traceability entry is provided (e.g., '[Domain component — to be identified with Product Engineer]')",
         "Output does not invent a component name to fill the gap"
       ]
+    },
+    {
+      "id": 4,
+      "prompt": "Sub-Process: RMD Calculation — calculates required minimum distribution amounts for eligible participants. Business Process: Required Minimum Distribution Processing. Ubiquitous Language document provided (defines: participant, RMD, applicable divisor, plan balance). Requirement missing traceability: 'Participant account balance must be retrieved before the RMD calculation begins.' Domain component corpus provided, including: (1) Distributions domain > Calculation sub-domain > Calculator for RMD (description: computes required minimum distribution amounts using IRS-approved divisors and current account balances); (2) Account Management domain > Balance Inquiry component (description: retrieves current account balance on demand for any downstream process). Please run traceability-linker.",
+      "expected_output": "The requirement shares vocabulary with Calculator for RMD ('RMD', 'plan balance') but describes a retrieval step that precedes calculation — the action 'retrieved before calculation begins' aligns at least as well with Balance Inquiry as with Calculator for RMD. The agent must NOT assign High confidence to either component. The output should label the proposal Medium (or Low) and explain that the near-miss vocabulary overlap with Calculator for RMD does not make it the unambiguous primary link, because the requirement describes a pre-calculation retrieval action that Balance Inquiry also covers.",
+      "assertions": [
+        "Confidence is NOT High for either candidate component",
+        "Both Calculator for RMD and Balance Inquiry are identified as candidate components",
+        "Rationale explicitly names the near-miss: 'RMD' and 'plan balance' vocabulary appears in Calculator for RMD but the action ('retrieve before calculation') fits Balance Inquiry",
+        "Ambiguity note explains that vocabulary overlap alone is insufficient for a High label when the action maps to a different component",
+        "Output does not force a single definitive link",
+        "No link is created — only proposed"
+      ]
     }
   ]
 }

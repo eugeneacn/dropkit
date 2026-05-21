@@ -1,6 +1,6 @@
 # Hierarchy Context Resolver
 
-Shared procedure used by A2, A4, and A5. The RKT Writing Guide structures business requirements at three levels: Business Process (L1) → Sub-Process (L2) → Business Requirement (L3). Any agent that acts on a requirement or sub-process must know its position in this hierarchy before proceeding.
+Shared procedure used by A2, A4, and A5. The requirements writing guide structures business requirements at three levels: Business Process (L1) → Sub-Process (L2) → Business Requirement (L3). Any agent that acts on a requirement or sub-process must know its position in this hierarchy before proceeding.
 
 ---
 
@@ -36,7 +36,18 @@ If either the L2 or L1 context is missing, stop and ask before proceeding:
 > - What is the name and description of the **Sub-Process** this sits under?
 > - What is the name and description of the **Business Process** above that?
 >
-> These are required — the RKT Writing Guide writes requirements at the sub-process level, and I cannot assess scope, level, or parent fit without knowing the hierarchy."
+> These are required — the requirements writing guide writes requirements at the sub-process level, and I cannot assess scope, level, or parent fit without knowing the hierarchy."
+
+### Step 2a — Accepting upstream skill output as hierarchy context
+
+When the user provides the output of an upstream BPR agent (e.g., a Business Process page produced by A1 bpr-intake-shaper, or a sub-process list produced by A4 process-cohesion-decomposition) as their input, that artifact may already contain the hierarchy context needed. In that case:
+
+1. Extract the L1 Business Process name and description from the artifact's Business Process page or header.
+2. Extract the L2 Sub-Process name and description from the artifact's sub-process section or the user's stated context.
+3. Confirm the extracted hierarchy at the top of the output report as normal (Step 4).
+4. Do **not** ask the user to re-state context that is already explicit in the provided artifact.
+
+If the artifact is ambiguous or incomplete — for example, a sub-process list with no descriptions — still ask for the missing fields before proceeding.
 
 ### Step 3 — Never infer hierarchy from content
 
