@@ -11,9 +11,10 @@ Stdlib only. Python >= 3.10.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterator, Optional, Sequence, Tuple
 
@@ -294,22 +295,76 @@ def _default_title(mode: str) -> str:
     return "AI-adoption report — {}".format(mode)
 
 
-def _t7_smoke_print(args: argparse.Namespace, report) -> None:
-    """T7-scoped smoke print: emit Markdown then JSON to stdout.
+def _resolve_generated_at() -> str:
+    """Return the ``generated_at`` timestamp the renderers should use.
 
-    T8 will replace this with the atomic write path. Until then, this
-    keeps the CLI useful for manual inspection. ``generated_at`` is the
-    fixed sentinel ``"<unset>"`` because T7 does not read the clock; T8
-    will compute and pass a real timestamp.
+    Honors the test-pinning env var :data:`write.GENERATED_AT_ENV_VAR`
+    (``AI_ADOPTION_REPORT_GENERATED_AT``) for deterministic-build tests
+    (T9's golden-file diffs rely on this). When unset, returns the
+    current UTC clock in ISO-8601 seconds precision with the trailing
+    ``Z`` form (``2026-05-19T14:30:00Z``).
+
+    T7 stays pure — never reads the clock or env. T8 owns the timestamp
+    and threads it through ``render_markdown`` / ``render_json``.
+    """
+    from .write import GENERATED_AT_ENV_VAR
+
+    pinned = os.environ.get(GENERATED_AT_ENV_VAR)
+    if pinned:
+        return pinned
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _render_and_write(args: argparse.Namespace, report) -> None:
+    """Render + atomic-write per ``--format``.
+
+    Dispatch:
+
+    - ``markdown``: write only the Markdown file at ``--output``.
+    - ``json``: write only the derived ``.json`` sidecar; the Markdown
+      renderer is **not** invoked at all (spec line 86, "json skips
+      Markdown rendering"). The ``--output`` flag is interpreted as the
+      Markdown-path-shaped value and the sidecar is derived from it —
+      so ``--format=json --output report.md`` writes ``report.json``
+      and never touches ``report.md``.
+    - ``both`` (default): render both, derive sidecar, write both atomically.
     """
     from .render import render_json, render_markdown
+    from .write import derive_sidecar_path, write_outputs
 
+    markdown_path = validate_local_path(args.output, role="output")
     title = getattr(args, "title", None) or _default_title(report.mode)
-    generated_at = "<unset>"
-    if getattr(args, "format", "both") in ("markdown", "both"):
-        print(render_markdown(report, title=title, generated_at=generated_at))
-    if getattr(args, "format", "both") in ("json", "both"):
-        print(render_json(report, title=title, generated_at=generated_at))
+    generated_at = _resolve_generated_at()
+    fmt = getattr(args, "format", "both")
+
+    if fmt == "markdown":
+        md_text = render_markdown(report, title=title, generated_at=generated_at)
+        write_outputs(
+            [(markdown_path, md_text)],
+            overwrite=args.overwrite,
+        )
+    elif fmt == "json":
+        # Per spec line 86 + T8 brief option (a): the --output path is
+        # always Markdown-shaped; for --format=json we still derive the
+        # sidecar path from it but skip the Markdown renderer entirely.
+        json_path = derive_sidecar_path(markdown_path)
+        json_text = render_json(report, title=title, generated_at=generated_at)
+        write_outputs(
+            [(json_path, json_text)],
+            overwrite=args.overwrite,
+        )
+    else:  # "both"
+        json_path = derive_sidecar_path(markdown_path)
+        md_text = render_markdown(report, title=title, generated_at=generated_at)
+        json_text = render_json(report, title=title, generated_at=generated_at)
+        write_outputs(
+            [(markdown_path, md_text), (json_path, json_text)],
+            overwrite=args.overwrite,
+        )
 
 
 def _run_baseline(args: argparse.Namespace) -> int:
@@ -318,7 +373,7 @@ def _run_baseline(args: argparse.Namespace) -> int:
     from .modes import run_baseline
 
     report = run_baseline(args)
-    _t7_smoke_print(args, report)
+    _render_and_write(args, report)
     return EXIT_OK
 
 
@@ -326,7 +381,7 @@ def _run_cohort(args: argparse.Namespace) -> int:
     from .modes import run_cohort
 
     report = run_cohort(args)
-    _t7_smoke_print(args, report)
+    _render_and_write(args, report)
     return EXIT_OK
 
 
@@ -334,7 +389,7 @@ def _run_program(args: argparse.Namespace) -> int:
     from .modes import run_program
 
     report = run_program(args)
-    _t7_smoke_print(args, report)
+    _render_and_write(args, report)
     return EXIT_OK
 
 
