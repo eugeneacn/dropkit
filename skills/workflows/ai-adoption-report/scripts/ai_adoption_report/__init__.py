@@ -290,16 +290,35 @@ def validate_args(args: argparse.Namespace) -> None:
 # Subcommand dispatch. baseline + cohort delegate to T3's modes module;
 # program is still stubbed for T4/T6.
 # ---------------------------------------------------------------------------
+def _default_title(mode: str) -> str:
+    return "AI-adoption report — {}".format(mode)
+
+
+def _t7_smoke_print(args: argparse.Namespace, report) -> None:
+    """T7-scoped smoke print: emit Markdown then JSON to stdout.
+
+    T8 will replace this with the atomic write path. Until then, this
+    keeps the CLI useful for manual inspection. ``generated_at`` is the
+    fixed sentinel ``"<unset>"`` because T7 does not read the clock; T8
+    will compute and pass a real timestamp.
+    """
+    from .render import render_json, render_markdown
+
+    title = getattr(args, "title", None) or _default_title(report.mode)
+    generated_at = "<unset>"
+    if getattr(args, "format", "both") in ("markdown", "both"):
+        print(render_markdown(report, title=title, generated_at=generated_at))
+    if getattr(args, "format", "both") in ("json", "both"):
+        print(render_json(report, title=title, generated_at=generated_at))
+
+
 def _run_baseline(args: argparse.Namespace) -> int:
     # Local import to avoid a module-load cycle: modes.py imports
     # ValidationError from this package.
     from .modes import run_baseline
 
     report = run_baseline(args)
-    # TODO(T7/T8): replace repr() with the Markdown renderer + atomic
-    # write path. T3 returns ReportData; the print is only here so the
-    # CLI smoke-test surfaces non-empty output until T7 lands.
-    print(repr(report))
+    _t7_smoke_print(args, report)
     return EXIT_OK
 
 
@@ -307,9 +326,7 @@ def _run_cohort(args: argparse.Namespace) -> int:
     from .modes import run_cohort
 
     report = run_cohort(args)
-    # TODO(T7/T8): replace repr() with the Markdown renderer + atomic
-    # write path.
-    print(repr(report))
+    _t7_smoke_print(args, report)
     return EXIT_OK
 
 
@@ -317,10 +334,7 @@ def _run_program(args: argparse.Namespace) -> int:
     from .modes import run_program
 
     report = run_program(args)
-    # TODO(T7/T8): replace repr() with the Markdown renderer + atomic
-    # write path. T6 returns ReportData; the print is only here so the
-    # CLI smoke-test surfaces non-empty output until T7 lands.
-    print(repr(report))
+    _t7_smoke_print(args, report)
     return EXIT_OK
 
 

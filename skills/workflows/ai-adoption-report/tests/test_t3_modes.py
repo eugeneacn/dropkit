@@ -163,8 +163,8 @@ def test_baseline_back_to_back_windows_allowed(tmp_path, monkeypatch):
     )
     assert rc == 0, "unexpected exit; stderr={!r}".format(err)
     assert "overlap" not in err.lower()
-    # T3 still prints repr(ReportData) until T7 lands.
-    assert "ReportData" in out
+    # T7 wired: the CLI now prints rendered Markdown + JSON to stdout.
+    assert "# AI-adoption report" in out
 
 
 def test_baseline_config_sha_drift_emits_note_and_renders_deltas(tmp_path, monkeypatch):
@@ -401,7 +401,7 @@ def test_cohort_cli_dispatch_smoke(tmp_path, monkeypatch):
         ["cohort", "--input", str(inp), "--output", "o.md"]
     )
     assert rc == 0, "stderr={!r}".format(err)
-    assert "ReportData" in out
+    assert "# AI-adoption report" in out
 
 
 def test_baseline_cli_dispatch_smoke(tmp_path, monkeypatch):
@@ -412,7 +412,7 @@ def test_baseline_cli_dispatch_smoke(tmp_path, monkeypatch):
         ["baseline", "--baseline", str(b), "--current", str(c), "--output", "o.md"]
     )
     assert rc == 0, "stderr={!r}".format(err)
-    assert "ReportData" in out
+    assert "# AI-adoption report" in out
 
 
 # ---------------------------------------------------------------------------

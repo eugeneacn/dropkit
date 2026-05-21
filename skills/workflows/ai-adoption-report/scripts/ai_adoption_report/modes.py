@@ -84,6 +84,13 @@ class ReportData:
     per_scope_rows: Optional[list] = None
     program_aggregates: Optional[dict] = None
     notes: List[str] = field(default_factory=list)
+    # Side labels for ``cohort_deltas`` cells. Carries the
+    # ``(a_label, b_label)`` tuple that the originating ``compute_deltas``
+    # call used so T7 can label the Cohort breakdown table columns
+    # accurately (baseline+cohort uses ``("baseline-cohort",
+    # "current-cohort")``; program mode uses ``("control", "cohort")``).
+    # ``None`` whenever ``cohort_deltas`` is ``None``.
+    cohort_side_labels: Optional[tuple] = None
 
 
 # ---------------------------------------------------------------------------
@@ -162,9 +169,16 @@ def run_baseline(args) -> ReportData:
     notes.extend(primary.notes)
 
     cohort_deltas: Optional[dict] = None
+    cohort_side_labels: Optional[tuple] = None
     if getattr(args, "include_cohort_breakdown", False):
         cohort_deltas, cohort_notes = _baseline_cohort_section(baseline, current)
         notes.extend(cohort_notes)
+        if cohort_deltas is not None:
+            # See :func:`_baseline_cohort_section`: compares
+            # ``baseline.cohort_breakdown.cohort`` vs
+            # ``current.cohort_breakdown.cohort`` (cohort sub-side moved
+            # across the two windows).
+            cohort_side_labels = ("baseline-cohort", "current-cohort")
 
     header_line = (
         "**Baseline window:** {bf}..{bt} | "
@@ -184,6 +198,7 @@ def run_baseline(args) -> ReportData:
         inputs=inputs,
         deltas=primary.to_dict(),
         cohort_deltas=cohort_deltas,
+        cohort_side_labels=cohort_side_labels,
         per_scope_rows=None,
         notes=notes,
     )
@@ -347,6 +362,7 @@ def run_program(args) -> ReportData:
             pass
 
     cohort_deltas: Optional[dict] = None
+    cohort_side_labels: Optional[tuple] = None
     if getattr(args, "include_cohort_breakdown", False):
         cohort_agg, cohort_notes = aggregate_cohort_side(
             program_inputs.scopes, "cohort"
@@ -379,6 +395,7 @@ def run_program(args) -> ReportData:
             )
             notes.extend(delta_result.notes)
             cohort_deltas = delta_result.to_dict()
+            cohort_side_labels = ("control", "cohort")
 
     # Per-scope rows: canonical sort by scope-repr (spec lines 506-507).
     sorted_scopes = sorted(
@@ -420,6 +437,7 @@ def run_program(args) -> ReportData:
         inputs=program_inputs.source_inputs,
         deltas={},
         cohort_deltas=cohort_deltas,
+        cohort_side_labels=cohort_side_labels,
         per_scope_rows=per_scope_rows,
         program_aggregates=global_agg,
         notes=notes,
